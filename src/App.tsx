@@ -7,6 +7,7 @@ import SignupPage from '@/pages/SignupPage';
 import AdminLayout from '@/pages/admin/AdminLayout';
 import AdminOverview from '@/pages/admin/AdminOverview';
 import AdminServices from '@/pages/admin/AdminServices';
+import AdminSpecialties from '@/pages/admin/AdminSpecialties';
 import AdminDoctors from '@/pages/admin/AdminDoctors';
 import AdminAppointments from '@/pages/admin/AdminAppointments';
 import AdminSettings from '@/pages/admin/AdminSettings';
@@ -53,6 +54,7 @@ export default function App() {
             }
           >
             <Route index element={<AdminOverview />} />
+            <Route path="specialties" element={<AdminSpecialties />} />
             <Route path="services" element={<AdminServices />} />
             <Route path="doctors" element={<AdminDoctors />} />
             <Route path="appointments" element={<AdminAppointments />} />

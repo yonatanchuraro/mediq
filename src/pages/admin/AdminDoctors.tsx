@@ -2,13 +2,20 @@ import { useEffect, useState } from 'react';
 import { Loader2, Pencil, Search, UserPlus } from 'lucide-react';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabase';
-import type { Doctor, Profile } from '@/types/database.types';
+import type { Doctor, Profile, Specialty } from '@/types/database.types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -20,8 +27,27 @@ import {
 import { PageHeader } from '@/components/layouts/AppShell';
 import { cn } from '@/lib/utils';
 
+const NONE = '__none__';
+const ALL = '__all__';
+
+const COLOR_BG: Record<string, string> = {
+  teal: 'bg-teal-500',
+  amber: 'bg-amber-500',
+  rose: 'bg-rose-500',
+  sky: 'bg-sky-500',
+  pink: 'bg-pink-500',
+  red: 'bg-red-500',
+  blue: 'bg-blue-500',
+  violet: 'bg-violet-500',
+  indigo: 'bg-indigo-500',
+  cyan: 'bg-cyan-500',
+  slate: 'bg-slate-500',
+  emerald: 'bg-emerald-500',
+};
+
 type DoctorRow = Doctor & {
   profile: Pick<Profile, 'id' | 'full_name' | 'email' | 'phone'> | null;
+  specialty: Specialty | null;
 };
 
 function doctorDisplayName(d: DoctorRow): string {
@@ -29,7 +55,7 @@ function doctorDisplayName(d: DoctorRow): string {
 }
 
 interface DoctorFieldsState {
-  specialty: string;
+  specialty_id: string;
   bio: string;
   license_number: string;
   active: boolean;
@@ -43,7 +69,7 @@ interface CreateFormState extends DoctorFieldsState {
 }
 
 const emptyFields: DoctorFieldsState = {
-  specialty: '',
+  specialty_id: NONE,
   bio: '',
   license_number: '',
   active: true,
@@ -59,7 +85,9 @@ const emptyCreate: CreateFormState = {
 
 export default function AdminDoctors() {
   const [doctors, setDoctors] = useState<DoctorRow[]>([]);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>(ALL);
 
   // edit
   const [editing, setEditing] = useState<DoctorRow | null>(null);
@@ -80,15 +108,25 @@ export default function AdminDoctors() {
   async function load() {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('doctors')
-        .select('*, profile:profiles!profile_id(id, full_name, email, phone)')
-        .order('created_at', { ascending: false });
-      if (error) {
-        console.error('[AdminDoctors] load error:', error);
-        toast.error(error.message);
+      const [{ data: docs, error: dErr }, { data: specs, error: spErr }] = await Promise.all([
+        supabase
+          .from('doctors')
+          .select(
+            '*, profile:profiles!profile_id(id, full_name, email, phone), specialty:specialties!specialty_id(*)'
+          )
+          .order('created_at', { ascending: false }),
+        supabase.from('specialties').select('*').eq('active', true).order('sort_order'),
+      ]);
+      if (dErr) {
+        console.error('[AdminDoctors] doctors error:', dErr);
+        toast.error(dErr.message);
       } else {
-        setDoctors((data ?? []) as DoctorRow[]);
+        setDoctors((docs ?? []) as unknown as DoctorRow[]);
+      }
+      if (spErr) {
+        console.error('[AdminDoctors] specialties error:', spErr);
+      } else {
+        setSpecialties((specs ?? []) as Specialty[]);
       }
     } catch (e) {
       console.error('[AdminDoctors] load threw:', e);
@@ -102,11 +140,18 @@ export default function AdminDoctors() {
     load();
   }, []);
 
+  const filteredDoctors =
+    filter === ALL
+      ? doctors
+      : filter === NONE
+      ? doctors.filter((d) => !d.specialty_id)
+      : doctors.filter((d) => d.specialty_id === filter);
+
   // ── Edit existing doctor ─────────────────────────────────────
   function openEdit(d: DoctorRow) {
     setEditing(d);
     setEditForm({
-      specialty: d.specialty ?? '',
+      specialty_id: d.specialty_id ?? NONE,
       bio: d.bio ?? '',
       license_number: d.license_number ?? '',
       active: d.active,
@@ -121,7 +166,7 @@ export default function AdminDoctors() {
     const { error } = await supabase
       .from('doctors')
       .update({
-        specialty: editForm.specialty.trim() || null,
+        specialty_id: editForm.specialty_id === NONE ? null : editForm.specialty_id,
         bio: editForm.bio.trim() || null,
         license_number: editForm.license_number.trim() || null,
         active: editForm.active,
@@ -174,7 +219,7 @@ export default function AdminDoctors() {
         password: createForm.password,
         full_name: createForm.full_name.trim(),
         phone: createForm.phone.trim() || undefined,
-        specialty: createForm.specialty.trim() || undefined,
+        specialty_id: createForm.specialty_id === NONE ? undefined : createForm.specialty_id,
         bio: createForm.bio.trim() || undefined,
         license_number: createForm.license_number.trim() || undefined,
       },
@@ -206,7 +251,7 @@ export default function AdminDoctors() {
 
     const { error: insertErr } = await supabase.from('doctors').insert({
       profile_id: foundProfile.id,
-      specialty: promoteForm.specialty.trim() || null,
+      specialty_id: promoteForm.specialty_id === NONE ? null : promoteForm.specialty_id,
       bio: promoteForm.bio.trim() || null,
       license_number: promoteForm.license_number.trim() || null,
       active: promoteForm.active,
@@ -226,12 +271,28 @@ export default function AdminDoctors() {
     <>
       <PageHeader
         title="רופאים"
-        description="ניהול רופאי המרפאה — התמחות, ביו, רישיון וסטטוס"
+        description="ניהול רופאי המרפאה — מחלקה, ביו, רישיון וסטטוס"
         action={
-          <Button onClick={openAdd}>
-            <UserPlus className="h-4 w-4" />
-            הוסף רופא
-          </Button>
+          <div className="flex items-center gap-3">
+            <Select value={filter} onValueChange={setFilter}>
+              <SelectTrigger className="w-[200px]">
+                <SelectValue placeholder="כל המחלקות" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL}>כל המחלקות</SelectItem>
+                <SelectItem value={NONE}>ללא מחלקה</SelectItem>
+                {specialties.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={openAdd}>
+              <UserPlus className="h-4 w-4" />
+              הוסף רופא
+            </Button>
+          </div>
         }
       />
 
@@ -242,21 +303,21 @@ export default function AdminDoctors() {
               <Loader2 className="h-4 w-4 animate-spin" />
               טוען…
             </div>
-          ) : doctors.length === 0 ? (
+          ) : filteredDoctors.length === 0 ? (
             <EmptyState onAdd={openAdd} />
           ) : (
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/30">
                 <tr className="text-right text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   <th className="px-6 py-3">שם</th>
-                  <th className="px-6 py-3">התמחות</th>
+                  <th className="px-6 py-3">מחלקה</th>
                   <th className="px-6 py-3">פרטים</th>
                   <th className="px-6 py-3">סטטוס</th>
                   <th className="px-6 py-3 text-left">פעולות</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
-                {doctors.map((d) => (
+                {filteredDoctors.map((d) => (
                   <tr key={d.profile_id} className="hover:bg-muted/30">
                     <td className="px-6 py-4">
                       <div className="font-medium">{doctorDisplayName(d)}</div>
@@ -265,7 +326,19 @@ export default function AdminDoctors() {
                       </div>
                     </td>
                     <td className="px-6 py-4">
-                      {d.specialty || <span className="text-muted-foreground/60">—</span>}
+                      {d.specialty ? (
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'inline-block h-2.5 w-2.5 rounded-full',
+                              COLOR_BG[d.specialty.color] ?? 'bg-primary'
+                            )}
+                          />
+                          {d.specialty.name}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground/60">—</span>
+                      )}
                     </td>
                     <td className="px-6 py-4 text-muted-foreground">
                       {d.profile?.phone ? <div>📞 {d.profile.phone}</div> : null}
@@ -308,7 +381,7 @@ export default function AdminDoctors() {
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submitEdit} className="space-y-4">
-            <DoctorFields form={editForm} setForm={setEditForm} />
+            <DoctorFields form={editForm} setForm={setEditForm} specialties={specialties} />
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={saving}>
                 ביטול
@@ -407,6 +480,7 @@ export default function AdminDoctors() {
               <DoctorFields
                 form={createForm}
                 setForm={(f) => setCreateForm({ ...createForm, ...f })}
+                specialties={specialties}
               />
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={saving}>
@@ -457,7 +531,7 @@ export default function AdminDoctors() {
                       תפקיד נוכחי: {foundProfile.role === 'client' ? 'מטופל' : foundProfile.role}
                     </div>
                   </div>
-                  <DoctorFields form={promoteForm} setForm={setPromoteForm} />
+                  <DoctorFields form={promoteForm} setForm={setPromoteForm} specialties={specialties} />
                 </>
               )}
 
@@ -481,20 +555,32 @@ export default function AdminDoctors() {
 function DoctorFields({
   form,
   setForm,
+  specialties,
 }: {
   form: DoctorFieldsState;
   setForm: (s: DoctorFieldsState) => void;
+  specialties: Specialty[];
 }) {
   return (
     <>
       <div className="space-y-2">
-        <Label htmlFor="specialty">התמחות</Label>
-        <Input
-          id="specialty"
-          value={form.specialty}
-          onChange={(e) => setForm({ ...form, specialty: e.target.value })}
-          placeholder="למשל: רופא משפחה, קרדיולוג"
-        />
+        <Label htmlFor="specialty">מחלקה</Label>
+        <Select
+          value={form.specialty_id}
+          onValueChange={(v) => setForm({ ...form, specialty_id: v })}
+        >
+          <SelectTrigger id="specialty">
+            <SelectValue placeholder="בחר מחלקה" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={NONE}>ללא מחלקה</SelectItem>
+            {specialties.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <div className="space-y-2">
         <Label htmlFor="bio">ביו (מוצג למטופלים)</Label>

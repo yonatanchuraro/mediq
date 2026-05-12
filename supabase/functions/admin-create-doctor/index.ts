@@ -33,7 +33,7 @@ interface Body {
   password: string;
   full_name: string;
   phone?: string;
-  specialty?: string;
+  specialty_id?: string;
   bio?: string;
   license_number?: string;
 }
@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
 
     // Validate body
     const body = (await req.json().catch(() => ({}))) as Partial<Body>;
-    const { email, password, full_name, phone, specialty, bio, license_number } = body;
+    const { email, password, full_name, phone, specialty_id, bio, license_number } = body;
     if (!email || !password || !full_name)
       return json({ error: 'email, password and full_name are required' }, 400);
     if (password.length < 6)
@@ -110,7 +110,7 @@ Deno.serve(async (req) => {
     // 3. Insert into doctors
     const { error: doctorErr } = await admin.from('doctors').insert({
       profile_id: newUserId,
-      specialty: specialty?.trim() || null,
+      specialty_id: specialty_id || null,
       bio: bio?.trim() || null,
       license_number: license_number?.trim() || null,
       active: true,

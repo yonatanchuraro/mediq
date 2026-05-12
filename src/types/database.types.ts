@@ -25,9 +25,20 @@ export interface Profile {
   updated_at: string;
 }
 
+export interface Specialty {
+  id: string;
+  name: string;
+  slug: string;
+  color: string;
+  icon: string | null;
+  sort_order: number;
+  active: boolean;
+  created_at: string;
+}
+
 export interface Doctor {
   profile_id: string;
-  specialty: string | null;
+  specialty_id: string | null;
   bio: string | null;
   license_number: string | null;
   active: boolean;
@@ -40,6 +51,7 @@ export interface Service {
   description: string | null;
   duration_minutes: number;
   price_cents: number | null;
+  specialty_id: string | null;
   active: boolean;
   created_at: string;
 }
