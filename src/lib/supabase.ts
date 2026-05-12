@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-import type { Database } from '@/types/database.types';
 
 const url = import.meta.env.VITE_SUPABASE_URL;
 const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -10,7 +9,10 @@ if (!url || !anon) {
   );
 }
 
-export const supabase = createClient<Database>(url, anon, {
+// Note: we leave the client untyped for now (no Database<T> generic).
+// Later we can regenerate strict types via `supabase gen types typescript ...`
+// and re-add the generic. For now Row shapes are explicit in src/types/database.types.ts.
+export const supabase = createClient(url, anon, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,

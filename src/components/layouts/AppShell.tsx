@@ -1,27 +1,26 @@
 import type { ReactNode } from 'react';
-import { Link, NavLink } from 'react-router-dom';
+import { NavLink, Outlet } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { BrandMark } from '@/components/BrandMark';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import { cn } from '@/lib/utils';
 
-interface NavItem {
+export interface NavItem {
   to: string;
   label: string;
   icon: ReactNode;
+  end?: boolean;
 }
 
 export function AppShell({
-  title,
   subtitle,
   nav,
   children,
 }: {
-  title: string;
   subtitle?: string;
   nav: NavItem[];
-  children: ReactNode;
+  children?: ReactNode;
 }) {
   const { profile, signOut } = useAuth();
 
@@ -43,7 +42,7 @@ export function AppShell({
             <NavLink
               key={item.to}
               to={item.to}
-              end
+              end={item.end}
               className={({ isActive }) =>
                 cn(
                   'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
@@ -60,13 +59,16 @@ export function AppShell({
         </nav>
 
         <div className="mt-4 border-t pt-4">
-          <div className="mb-2 px-3 text-xs text-muted-foreground">
-            {profile?.full_name ?? profile?.email}
+          <div className="mb-2 px-3">
+            <div className="text-sm font-medium text-foreground">
+              {profile?.full_name ?? profile?.email}
+            </div>
+            <div className="text-xs text-muted-foreground">{profile?.email}</div>
           </div>
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start gap-3 text-muted-foreground hover:text-destructive"
+            className="w-full justify-start gap-3 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             onClick={() => signOut()}
           >
             <LogOut className="h-4 w-4" />
@@ -75,30 +77,29 @@ export function AppShell({
         </div>
       </aside>
 
-      <main className="h-screen overflow-y-auto p-8">
-        <header className="mb-6">
-          <h1 className="text-3xl font-extrabold tracking-tight">{title}</h1>
-          {subtitle && (
-            <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
-          )}
-        </header>
-        {children}
-      </main>
+      <main className="h-screen overflow-y-auto p-8">{children ?? <Outlet />}</main>
     </div>
   );
 }
 
-export function PlaceholderCard({ title, description }: { title: string; description: string }) {
+export function PageHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description?: string;
+  action?: ReactNode;
+}) {
   return (
-    <div className="rounded-xl border bg-card p-8 text-center shadow-sm">
-      <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-        <BrandMark className="h-6 w-6" />
+    <header className="mb-6 flex items-end justify-between gap-4">
+      <div>
+        <h1 className="text-3xl font-extrabold tracking-tight">{title}</h1>
+        {description && (
+          <p className="mt-1 text-sm text-muted-foreground">{description}</p>
+        )}
       </div>
-      <h3 className="text-lg font-semibold">{title}</h3>
-      <p className="mt-2 text-sm text-muted-foreground">{description}</p>
-      <p className="mt-4 text-xs text-muted-foreground">
-        בקרוב — בשלב הבא של הפיתוח. ראה <Link to="/" className="text-primary underline">בית</Link>.
-      </p>
-    </div>
+      {action}
+    </header>
   );
 }

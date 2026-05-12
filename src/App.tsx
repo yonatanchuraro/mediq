@@ -1,12 +1,15 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth/AuthProvider';
 import { ProtectedRoute } from '@/routes/ProtectedRoute';
 import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
-import AdminDashboard from '@/pages/AdminDashboard';
+import AdminLayout from '@/pages/admin/AdminLayout';
+import AdminOverview from '@/pages/admin/AdminOverview';
+import AdminServices from '@/pages/admin/AdminServices';
+import AdminPlaceholder from '@/pages/admin/AdminPlaceholder';
 import DoctorDashboard from '@/pages/DoctorDashboard';
 import ClientDashboard from '@/pages/ClientDashboard';
-import { Loader2 } from 'lucide-react';
 
 function RootRedirect() {
   const { loading, session, profile } = useAuth();
@@ -34,13 +37,44 @@ export default function App() {
           <Route path="/signup" element={<SignupPage />} />
 
           <Route
-            path="/admin/*"
+            path="/admin"
             element={
               <ProtectedRoute requireRole="admin">
-                <AdminDashboard />
+                <AdminLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<AdminOverview />} />
+            <Route path="services" element={<AdminServices />} />
+            <Route
+              path="doctors"
+              element={
+                <AdminPlaceholder
+                  title="רופאים"
+                  description="ניהול רופאים, התמחויות וזמינות"
+                />
+              }
+            />
+            <Route
+              path="appointments"
+              element={
+                <AdminPlaceholder
+                  title="תורים"
+                  description="כל התורים במרפאה — תצוגה, סינון ועריכה"
+                />
+              }
+            />
+            <Route
+              path="settings"
+              element={
+                <AdminPlaceholder
+                  title="הגדרות"
+                  description="הגדרות מרפאה, סיסמה ופרופיל"
+                />
+              }
+            />
+          </Route>
+
           <Route
             path="/doctor/*"
             element={
