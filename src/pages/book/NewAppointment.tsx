@@ -22,13 +22,18 @@ import { roundToNextQuarter, toLocalInput } from '@/lib/datetime';
 
 interface DoctorOption {
   profile_id: string;
-  specialty: string | null;
+  specialty_id: string | null;
   bio: string | null;
   profile: { full_name: string | null } | null;
+  specialty: { name: string | null; color: string } | null;
 }
 
 function doctorName(d: DoctorOption): string {
   return d.profile?.full_name?.trim() || 'רופא';
+}
+
+function doctorSpecialty(d: DoctorOption): string | null {
+  return d.specialty?.name?.trim() || null;
 }
 
 export default function NewAppointment() {
@@ -58,7 +63,9 @@ export default function NewAppointment() {
           supabase.from('services').select('*').eq('active', true).order('name'),
           supabase
             .from('doctors')
-            .select('profile_id, specialty, bio, profile:profiles!profile_id(full_name)')
+            .select(
+              'profile_id, specialty_id, bio, profile:profiles!profile_id(full_name), specialty:specialties!specialty_id(name, color)'
+            )
             .eq('active', true)
             .order('created_at', { ascending: false }),
           supabase.from('doctor_services').select('doctor_id, service_id'),
@@ -209,12 +216,15 @@ export default function NewAppointment() {
                     <SelectValue placeholder="בחר רופא" />
                   </SelectTrigger>
                   <SelectContent>
-                    {filteredDoctors.map((d) => (
-                      <SelectItem key={d.profile_id} value={d.profile_id}>
-                        {doctorName(d)}
-                        {d.specialty ? ` · ${d.specialty}` : ''}
-                      </SelectItem>
-                    ))}
+                    {filteredDoctors.map((d) => {
+                      const spec = doctorSpecialty(d);
+                      return (
+                        <SelectItem key={d.profile_id} value={d.profile_id}>
+                          {doctorName(d)}
+                          {spec ? ` · ${spec}` : ''}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

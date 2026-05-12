@@ -132,7 +132,9 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
     async list_doctors({ service_id }: { service_id?: string }): Promise<unknown> {
       let query = sb
         .from('doctors')
-        .select('profile_id, specialty, bio, profile:profiles!profile_id(full_name)')
+        .select(
+          'profile_id, bio, profile:profiles!profile_id(full_name), specialty:specialties!specialty_id(name)'
+        )
         .eq('active', true);
 
       if (service_id) {
@@ -150,20 +152,17 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
       const { data, error } = await query;
       if (error) return { error: error.message };
 
-      const extractName = (profile: any): string | null => {
-        if (!profile) return null;
-        if (Array.isArray(profile)) {
-          const first = profile[0];
-          return first?.full_name?.trim() || null;
-        }
-        return profile.full_name?.trim() || null;
+      const extractField = (val: any, field: string): string | null => {
+        if (!val) return null;
+        if (Array.isArray(val)) return val[0]?.[field]?.trim() || null;
+        return val[field]?.trim() || null;
       };
 
       return {
         doctors: (data ?? []).map((d: any) => ({
           id: d.profile_id,
-          name: extractName(d.profile),
-          specialty: d.specialty,
+          name: extractField(d.profile, 'full_name'),
+          specialty: extractField(d.specialty, 'name'),
           bio: d.bio,
         })),
       };
