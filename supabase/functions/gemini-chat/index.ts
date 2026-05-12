@@ -56,6 +56,8 @@ function buildSystemPrompt(): string {
 6. אחרי הזמנה מוצלחת — אישור קצר עם שם הרופא, סוג הביקור, יום ושעה.
 
 כללי איכות:
+- כשמזכיר רופא — השתמש ב-name המדויק מ-list_doctors (למשל "ד״ר רחל אברהם"). אסור להמציא שם או להשתמש בהתמחות כשם.
+- אם name חזר null מ-list_doctors — אמור "הרופאה" / "הרופא" + ההתמחות ("הרופאה הגינקולוגית"), אל תמציא שם.
 - לעולם אל תבקש מהמשתמש את ה-ID של רופא או שירות — תזכור אותם מהקריאות הקודמות.
 - אם book_appointment מחזיר error — הסבר ונסה זמן חלופי.
 - אם המשתמש מבטא דחיפות רפואית אמיתית, הצע לו לפנות ישירות למוקד או למיון.`;
@@ -133,14 +135,12 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
         .eq('active', true);
 
       if (service_id) {
-        // join doctor_services to filter
         const { data: dsRows, error: dsErr } = await sb
           .from('doctor_services')
           .select('doctor_id')
           .eq('service_id', service_id);
         if (dsErr) return { error: dsErr.message };
         const allowed = (dsRows ?? []).map((r: any) => r.doctor_id);
-        // If no mapping exists yet, show all doctors so clinic isn't blocked
         if (allowed.length > 0) {
           query = query.in('profile_id', allowed);
         }
@@ -148,10 +148,20 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
 
       const { data, error } = await query;
       if (error) return { error: error.message };
+
+      const extractName = (profile: any): string | null => {
+        if (!profile) return null;
+        if (Array.isArray(profile)) {
+          const first = profile[0];
+          return first?.full_name?.trim() || null;
+        }
+        return profile.full_name?.trim() || null;
+      };
+
       return {
         doctors: (data ?? []).map((d: any) => ({
           id: d.profile_id,
-          name: d.profile?.full_name,
+          name: extractName(d.profile),
           specialty: d.specialty,
           bio: d.bio,
         })),
