@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/select';
 import { PageHeader } from '@/components/layouts/AppShell';
 import { roundToNextQuarter, toLocalInput } from '@/lib/datetime';
+import { notifyWhatsapp } from '@/lib/notifications';
 
 interface DoctorOption {
   profile_id: string;
@@ -136,16 +137,20 @@ export default function NewAppointment() {
     const end = new Date(start.getTime() + selectedService.duration_minutes * 60_000);
 
     setSubmitting(true);
-    const { error } = await supabase.from('appointments').insert({
-      client_id: user.id,
-      doctor_id: doctorId,
-      service_id: serviceId,
-      start_at: start.toISOString(),
-      end_at: end.toISOString(),
-      notes: notes.trim() || null,
-      created_by: user.id,
-      status: 'pending',
-    });
+    const { data: created, error } = await supabase
+      .from('appointments')
+      .insert({
+        client_id: user.id,
+        doctor_id: doctorId,
+        service_id: serviceId,
+        start_at: start.toISOString(),
+        end_at: end.toISOString(),
+        notes: notes.trim() || null,
+        created_by: user.id,
+        status: 'pending',
+      })
+      .select('id')
+      .single();
     setSubmitting(false);
 
     if (error) {
@@ -157,6 +162,7 @@ export default function NewAppointment() {
       return;
     }
     toast.success('התור נקבע');
+    if (created?.id) notifyWhatsapp(created.id, 'confirmation');
     navigate('/book');
   }
 

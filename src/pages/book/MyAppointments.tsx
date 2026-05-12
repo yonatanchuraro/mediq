@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { PageHeader } from '@/components/layouts/AppShell';
 import { fmtDate, fmtTime, isPast } from '@/lib/datetime';
+import { notifyWhatsapp } from '@/lib/notifications';
 
 interface AppointmentRow {
   id: string;
@@ -99,6 +100,7 @@ export default function MyAppointments() {
       return;
     }
     toast.success('התור בוטל');
+    notifyWhatsapp(id, 'cancellation');
     load();
   }
 

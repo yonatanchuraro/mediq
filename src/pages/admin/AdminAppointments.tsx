@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { fmtDate, fmtTime } from '@/lib/datetime';
+import { notifyWhatsapp } from '@/lib/notifications';
 import type { AppointmentStatus } from '@/types/database.types';
 
 interface AdminAppointmentRow {
@@ -129,6 +130,7 @@ export default function AdminAppointments() {
       .eq('id', selected.id);
     if (error) return toast.error(error.message);
     toast.success(successMsg);
+    if (status === 'cancelled') notifyWhatsapp(selected.id, 'cancellation');
     setSelectedId(null);
     reload();
   }
