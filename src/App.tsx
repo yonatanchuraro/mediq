@@ -10,7 +10,10 @@ import AdminServices from '@/pages/admin/AdminServices';
 import AdminDoctors from '@/pages/admin/AdminDoctors';
 import AdminPlaceholder from '@/pages/admin/AdminPlaceholder';
 import DoctorDashboard from '@/pages/DoctorDashboard';
-import ClientDashboard from '@/pages/ClientDashboard';
+import BookLayout from '@/pages/book/BookLayout';
+import MyAppointments from '@/pages/book/MyAppointments';
+import NewAppointment from '@/pages/book/NewAppointment';
+import BookChatPlaceholder from '@/pages/book/BookChatPlaceholder';
 
 function RootRedirect() {
   const { loading, session, profile } = useAuth();
@@ -77,13 +80,17 @@ export default function App() {
             }
           />
           <Route
-            path="/book/*"
+            path="/book"
             element={
               <ProtectedRoute requireRole={['client', 'admin']}>
-                <ClientDashboard />
+                <BookLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<MyAppointments />} />
+            <Route path="new" element={<NewAppointment />} />
+            <Route path="chat" element={<BookChatPlaceholder />} />
+          </Route>
 
           <Route path="/" element={<RootRedirect />} />
           <Route path="*" element={<Navigate to="/" replace />} />

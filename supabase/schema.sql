@@ -231,16 +231,30 @@ create policy profiles_select_doctors on public.profiles
     )
   );
 
+-- Self-update policy: just match the row.
+-- Role-escalation is prevented via the trigger below (NOT a recursive subquery
+-- in the policy, which would cause infinite recursion in RLS evaluation).
 create policy profiles_update_self on public.profiles
-  for update using (id = auth.uid())
-  with check (
-    id = auth.uid()
-    -- prevent a user from escalating their own role
-    and role = (select role from public.profiles where id = auth.uid())
-  );
+  for update using (id = auth.uid()) with check (id = auth.uid());
 
 create policy profiles_all_admin on public.profiles
   for all using (public.is_admin()) with check (public.is_admin());
+
+-- Prevent non-admins from changing the role column on their own profile.
+-- is_admin() is SECURITY DEFINER, so it safely bypasses RLS.
+create or replace function public.profiles_role_guard() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if new.role is distinct from old.role and not public.is_admin() then
+    raise exception 'Only admins can change a user role';
+  end if;
+  return new;
+end $$;
+
+drop trigger if exists profiles_role_guard on public.profiles;
+create trigger profiles_role_guard
+  before update on public.profiles
+  for each row execute function public.profiles_role_guard();
 
 -- ── doctors (public catalog of practitioners) ────────────────────────
 drop policy if exists doctors_select_all   on public.doctors;
