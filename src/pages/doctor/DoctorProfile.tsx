@@ -9,26 +9,52 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import type { Specialty } from '@/types/database.types';
+import { cn } from '@/lib/utils';
 
 interface Form {
   full_name: string;
   phone: string;
-  specialty: string;
+  specialty_id: string;
   bio: string;
   license_number: string;
 }
 
+const NONE = '__none__';
 const empty: Form = {
   full_name: '',
   phone: '',
-  specialty: '',
+  specialty_id: NONE,
   bio: '',
   license_number: '',
+};
+
+const COLOR_BG: Record<string, string> = {
+  teal: 'bg-teal-500',
+  amber: 'bg-amber-500',
+  rose: 'bg-rose-500',
+  sky: 'bg-sky-500',
+  pink: 'bg-pink-500',
+  red: 'bg-red-500',
+  blue: 'bg-blue-500',
+  violet: 'bg-violet-500',
+  indigo: 'bg-indigo-500',
+  cyan: 'bg-cyan-500',
+  slate: 'bg-slate-500',
+  emerald: 'bg-emerald-500',
 };
 
 export default function DoctorProfile() {
   const { user, refreshProfile } = useAuth();
   const [form, setForm] = useState<Form>(empty);
+  const [specialties, setSpecialties] = useState<Specialty[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -36,7 +62,7 @@ export default function DoctorProfile() {
     if (!user) return;
     setLoading(true);
     try {
-      const [{ data: profile, error: pErr }, { data: doctor, error: dErr }] = await Promise.all([
+      const [profileRes, doctorRes, specsRes] = await Promise.all([
         supabase
           .from('profiles')
           .select('full_name, phone')
@@ -44,19 +70,26 @@ export default function DoctorProfile() {
           .maybeSingle(),
         supabase
           .from('doctors')
-          .select('specialty, bio, license_number')
+          .select('specialty_id, bio, license_number')
           .eq('profile_id', user.id)
           .maybeSingle(),
+        supabase
+          .from('specialties')
+          .select('*')
+          .eq('active', true)
+          .order('sort_order'),
       ]);
-      if (pErr) toast.error(pErr.message);
-      if (dErr) toast.error(dErr.message);
+      if (profileRes.error) toast.error(profileRes.error.message);
+      if (doctorRes.error) toast.error(doctorRes.error.message);
+      if (specsRes.error) toast.error(specsRes.error.message);
       setForm({
-        full_name: profile?.full_name ?? '',
-        phone: profile?.phone ?? '',
-        specialty: doctor?.specialty ?? '',
-        bio: doctor?.bio ?? '',
-        license_number: doctor?.license_number ?? '',
+        full_name: profileRes.data?.full_name ?? '',
+        phone: profileRes.data?.phone ?? '',
+        specialty_id: doctorRes.data?.specialty_id ?? NONE,
+        bio: doctorRes.data?.bio ?? '',
+        license_number: doctorRes.data?.license_number ?? '',
       });
+      setSpecialties((specsRes.data ?? []) as Specialty[]);
     } catch (e) {
       console.error('[DoctorProfile] load threw', e);
       toast.error(e instanceof Error ? e.message : 'טעינה נכשלה');
@@ -89,7 +122,7 @@ export default function DoctorProfile() {
       const { error: dErr } = await supabase
         .from('doctors')
         .update({
-          specialty: form.specialty.trim() || null,
+          specialty_id: form.specialty_id === NONE ? null : form.specialty_id,
           bio: form.bio.trim() || null,
           license_number: form.license_number.trim() || null,
         })
@@ -108,7 +141,7 @@ export default function DoctorProfile() {
 
   return (
     <>
-      <PageHeader title="פרופיל" description="פרטים אישיים והתמחות מקצועית" />
+      <PageHeader title="פרופיל" description="פרטים אישיים ומחלקה מקצועית" />
       {loading ? (
         <div className="flex items-center justify-center gap-2 p-12 text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
@@ -139,12 +172,34 @@ export default function DoctorProfile() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="dp_specialty">התמחות</Label>
-                <Input
-                  id="dp_specialty"
-                  value={form.specialty}
-                  onChange={(e) => setForm({ ...form, specialty: e.target.value })}
-                />
+                <Label htmlFor="dp_specialty">מחלקה / התמחות</Label>
+                <Select
+                  value={form.specialty_id}
+                  onValueChange={(v) => setForm({ ...form, specialty_id: v })}
+                >
+                  <SelectTrigger id="dp_specialty">
+                    <SelectValue placeholder="בחר מחלקה" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NONE}>ללא מחלקה</SelectItem>
+                    {specialties.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        <span className="inline-flex items-center gap-2">
+                          <span
+                            className={cn(
+                              'inline-block h-2.5 w-2.5 rounded-full',
+                              COLOR_BG[s.color] ?? 'bg-primary'
+                            )}
+                          />
+                          {s.name}
+                        </span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  המחלקה מנוהלת מעמוד "מחלקות" של האדמין.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="dp_license">מס׳ רישיון</Label>

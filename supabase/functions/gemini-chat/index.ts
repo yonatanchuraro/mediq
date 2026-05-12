@@ -38,6 +38,22 @@ async function cached<T>(key: string, loader: () => Promise<T>): Promise<T> {
   return data;
 }
 
+/** Returns the Israel UTC offset string ("+03:00" DST / "+02:00" winter) for
+ *  a YYYY-MM-DD date by comparing what Asia/Jerusalem reports for that
+ *  date's UTC midnight. */
+function israelOffsetForDate(dateStr: string): string {
+  const utcMidnight = new Date(`${dateStr}T00:00:00Z`);
+  const israelHour = parseInt(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Asia/Jerusalem',
+      hour: '2-digit',
+      hour12: false,
+    }).format(utcMidnight),
+    10
+  );
+  return israelHour === 3 ? '+03:00' : '+02:00';
+}
+
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -64,8 +80,9 @@ function buildSystemPrompt(): string {
 חוקי זהב — אסור לשבור אותם:
 1. **בצע, אל תבקש אישור לבצע.** אם חסר לך מידע, קרא לכלי מיידית — אל תשאל "האם תרצי שאבדוק?". זו ההנחה.
 2. **לעולם אל תזכיר טרמינולוגיה טכנית** למשתמש: אסור "ID", "service_id", "doctor_id", "אני בודקת בDB", "מצאתי את ה-ID הנכון".
-3. **אסור להתנצל על שגיאות פנימיות.** אם כלי החזיר שגיאה — נסה שוב בשקט עם פרמטרים אחרים, בלי לומר "אופס" או "הייתה שגיאה טכנית". מבחינת המשתמש: כל מה שראה הוא תשובה אחת מועילה.
-4. **תזכור הקשר תמיד.** ברגע שמצאת service_id או doctor_id, השתמש בהם שוב. אל תקרא ל-list_services פעמיים באותה שיחה.
+3. **לעולם אל תכלול בתגובה הטקסטואלית JSON, "tool_outputs", "functionResponse" או כל פלט גולמי של כלי.** הכלים הם שימוש פנימי שלך בלבד — המשתמש לא רואה אותם, ואסור לך להעתיק אותם לטקסט.
+4. **אסור להתנצל על שגיאות פנימיות.** אם כלי החזיר שגיאה — נסה שוב בשקט עם פרמטרים אחרים, בלי לומר "אופס" או "הייתה שגיאה טכנית".
+5. **תזכור הקשר תמיד.** ברגע שמצאת service_id או doctor_id, השתמש בהם שוב. אל תקרא ל-list_services פעמיים באותה שיחה.
 
 זרימת עבודה אופטימלית:
 A. המשתמש מתאר צורך → קרא ברצף: list_services → list_doctors(service_id) → check_availability עבור 1-3 ימים פנויים.
@@ -259,8 +276,13 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
         isOpen = true;
       }
 
-      const dayStart = new Date(`${date}T${startTime}`);
-      const dayEnd = new Date(`${date}T${endTime}`);
+      // Construct dayStart/dayEnd in Israel local time, since startTime / endTime
+      // are clock times on the doctor's local schedule. Deno runs in UTC, so
+      // we must attach the Israel offset explicitly. Israel observes DST roughly
+      // late-March to late-October each year.
+      const offset = israelOffsetForDate(date);
+      const dayStart = new Date(`${date}T${startTime}:00${offset}`);
+      const dayEnd = new Date(`${date}T${endTime}:00${offset}`);
       void isOpen;
 
       // existing appointments for that doctor that day
