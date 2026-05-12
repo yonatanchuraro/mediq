@@ -1,0 +1,380 @@
+// MediQ — Gemini booking chat (Supabase Edge Function, Deno runtime)
+//
+// Receives chat messages from the client, talks to Gemini with function-calling
+// (list_services / list_doctors / check_availability / book_appointment),
+// executes the called tools against Supabase (as the authenticated user, so RLS
+// applies), and returns the model's final reply.
+//
+// Secrets expected in the Supabase project (set via Dashboard → Edge Functions
+// → Secrets, OR `supabase secrets set ...`):
+//   GEMINI_API_KEY        — Google AI Studio key
+//
+// Auto-injected by Supabase runtime (no need to set manually):
+//   SUPABASE_URL
+//   SUPABASE_ANON_KEY
+
+// deno-lint-ignore-file no-explicit-any
+
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.47.10';
+
+const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
+const GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+const MAX_TOOL_ROUNDS = 6;
+
+const CORS_HEADERS: Record<string, string> = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
+
+const SYSTEM_PROMPT = `אתה עוזר חכם של מרפאת MediQ שעוזר ללקוחות לקבוע תורים.
+ענה תמיד בעברית, בטון חם, ברור וקצר.
+
+תהליך עבודה מומלץ:
+1. אם המשתמש לא בחר סוג ביקור — קרא ל-list_services והצע אפשרויות.
+2. אם המשתמש לא בחר רופא — קרא ל-list_doctors (אפשר עם service_id) והצע.
+3. כשיש לך service_id ו-doctor_id ותאריך פוטנציאלי — קרא ל-check_availability ובחר זמן ספציפי שתואם את בקשת המשתמש.
+4. אחרי שהמשתמש אישר זמן ספציפי — קרא ל-book_appointment ליצירת התור.
+
+תמיד תאשר עם המשתמש לפני יצירת התור (book_appointment) — ציין שם רופא, סוג ביקור, יום ושעה.
+אם המשתמש מבטא דחיפות רפואית אמיתית, הצע לו לפנות ישירות למוקד או למיון.
+אל תמציא נתונים; אם אין לך מידע — קרא לכלי המתאים.`;
+
+const TOOLS = [
+  {
+    functionDeclarations: [
+      {
+        name: 'list_services',
+        description: 'מחזיר רשימה של סוגי ביקור פעילים במרפאה',
+        parameters: { type: 'object', properties: {} },
+      },
+      {
+        name: 'list_doctors',
+        description: 'מחזיר רשימה של רופאים פעילים. אופציונלי לסנן לפי service_id',
+        parameters: {
+          type: 'object',
+          properties: {
+            service_id: { type: 'string', description: 'אם נתון — להחזיר רק רופאים שמציעים שירות זה' },
+          },
+        },
+      },
+      {
+        name: 'check_availability',
+        description:
+          'מחזיר זמנים פנויים אצל רופא ביום נתון (תאריך בלבד, ISO YYYY-MM-DD), על בסיס שעות העבודה של הרופא והתורים הקיימים',
+        parameters: {
+          type: 'object',
+          properties: {
+            doctor_id: { type: 'string' },
+            service_id: { type: 'string' },
+            date: { type: 'string', description: 'YYYY-MM-DD' },
+          },
+          required: ['doctor_id', 'service_id', 'date'],
+        },
+      },
+      {
+        name: 'book_appointment',
+        description:
+          'יוצר תור חדש עבור המשתמש המחובר. חובה לאשר עם המשתמש לפני קריאה לכלי זה',
+        parameters: {
+          type: 'object',
+          properties: {
+            doctor_id: { type: 'string' },
+            service_id: { type: 'string' },
+            start_at: { type: 'string', description: 'ISO 8601 datetime עם timezone' },
+            notes: { type: 'string', description: 'סיבת הביקור או הערות (אופציונלי)' },
+          },
+          required: ['doctor_id', 'service_id', 'start_at'],
+        },
+      },
+    ],
+  },
+];
+
+// ── tool implementations ────────────────────────────────────────────────────
+
+function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
+  return {
+    async list_services(): Promise<unknown> {
+      const { data, error } = await sb
+        .from('services')
+        .select('id, name, description, duration_minutes, price_cents')
+        .eq('active', true)
+        .order('name');
+      if (error) return { error: error.message };
+      return { services: data };
+    },
+
+    async list_doctors({ service_id }: { service_id?: string }): Promise<unknown> {
+      let query = sb
+        .from('doctors')
+        .select('profile_id, specialty, bio, profile:profiles!profile_id(full_name)')
+        .eq('active', true);
+
+      if (service_id) {
+        // join doctor_services to filter
+        const { data: dsRows, error: dsErr } = await sb
+          .from('doctor_services')
+          .select('doctor_id')
+          .eq('service_id', service_id);
+        if (dsErr) return { error: dsErr.message };
+        const allowed = (dsRows ?? []).map((r: any) => r.doctor_id);
+        // If no mapping exists yet, show all doctors so clinic isn't blocked
+        if (allowed.length > 0) {
+          query = query.in('profile_id', allowed);
+        }
+      }
+
+      const { data, error } = await query;
+      if (error) return { error: error.message };
+      return {
+        doctors: (data ?? []).map((d: any) => ({
+          id: d.profile_id,
+          name: d.profile?.full_name,
+          specialty: d.specialty,
+          bio: d.bio,
+        })),
+      };
+    },
+
+    async check_availability({
+      doctor_id,
+      service_id,
+      date,
+    }: {
+      doctor_id: string;
+      service_id: string;
+      date: string; // YYYY-MM-DD
+    }): Promise<unknown> {
+      const [{ data: svc, error: svcErr }, { data: hours, error: hErr }] = await Promise.all([
+        sb.from('services').select('duration_minutes').eq('id', service_id).maybeSingle(),
+        sb
+          .from('working_hours')
+          .select('weekday, start_time, end_time, is_open')
+          .eq('doctor_id', doctor_id),
+      ]);
+      if (svcErr) return { error: svcErr.message };
+      if (hErr) return { error: hErr.message };
+      if (!svc) return { error: 'שירות לא נמצא' };
+
+      const duration = svc.duration_minutes as number;
+      const dayDate = new Date(`${date}T00:00:00`);
+      const weekday = dayDate.getDay();
+      const wh = (hours ?? []).find((h: any) => h.weekday === weekday);
+
+      if (!wh || !wh.is_open) {
+        return { date, weekday, open: false, slots: [] };
+      }
+
+      const dayStart = new Date(`${date}T${wh.start_time}`);
+      const dayEnd = new Date(`${date}T${wh.end_time}`);
+
+      // existing appointments for that doctor that day
+      const dayStartIso = new Date(`${date}T00:00:00Z`).toISOString();
+      const dayEndIso = new Date(`${date}T23:59:59Z`).toISOString();
+      const { data: appts, error: aErr } = await sb
+        .from('appointments')
+        .select('start_at, end_at, status')
+        .eq('doctor_id', doctor_id)
+        .gte('start_at', dayStartIso)
+        .lte('start_at', dayEndIso)
+        .neq('status', 'cancelled');
+      if (aErr) return { error: aErr.message };
+
+      const taken = (appts ?? []).map((a: any) => ({
+        start: new Date(a.start_at).getTime(),
+        end: new Date(a.end_at).getTime(),
+      }));
+
+      // build candidate slots every `duration` minutes
+      const slots: string[] = [];
+      const stepMs = Math.max(15, Math.min(30, duration)) * 60_000;
+      for (let t = dayStart.getTime(); t + duration * 60_000 <= dayEnd.getTime(); t += stepMs) {
+        const slotEnd = t + duration * 60_000;
+        const overlaps = taken.some((x) => !(slotEnd <= x.start || t >= x.end));
+        if (!overlaps && t > Date.now()) slots.push(new Date(t).toISOString());
+        if (slots.length >= 12) break;
+      }
+
+      return { date, weekday, open: true, duration_minutes: duration, slots };
+    },
+
+    async book_appointment({
+      doctor_id,
+      service_id,
+      start_at,
+      notes,
+    }: {
+      doctor_id: string;
+      service_id: string;
+      start_at: string;
+      notes?: string;
+    }): Promise<unknown> {
+      const { data: svc, error: svcErr } = await sb
+        .from('services')
+        .select('duration_minutes, name')
+        .eq('id', service_id)
+        .maybeSingle();
+      if (svcErr) return { error: svcErr.message };
+      if (!svc) return { error: 'שירות לא נמצא' };
+
+      const start = new Date(start_at);
+      if (Number.isNaN(start.getTime())) return { error: 'תאריך לא תקין' };
+      if (start.getTime() < Date.now()) return { error: 'לא ניתן לקבוע תור לעבר' };
+      const end = new Date(start.getTime() + (svc.duration_minutes as number) * 60_000);
+
+      const { data, error } = await sb
+        .from('appointments')
+        .insert({
+          client_id: userId,
+          doctor_id,
+          service_id,
+          start_at: start.toISOString(),
+          end_at: end.toISOString(),
+          notes: notes ?? null,
+          status: 'pending',
+          created_by: userId,
+        })
+        .select('id, start_at, end_at')
+        .single();
+
+      if (error) {
+        const msg = error.message?.toLowerCase() ?? '';
+        if (msg.includes('overlap') || error.code === '23P01') {
+          return { error: 'הזמן הזה תפוס. נסה זמן אחר.' };
+        }
+        return { error: error.message };
+      }
+      return {
+        success: true,
+        appointment_id: data.id,
+        service: svc.name,
+        start_at: data.start_at,
+        end_at: data.end_at,
+      };
+    },
+  };
+}
+
+// ── Gemini conversation loop ────────────────────────────────────────────────
+
+type GeminiPart =
+  | { text: string }
+  | { functionCall: { name: string; args: Record<string, unknown> } }
+  | { functionResponse: { name: string; response: unknown } };
+
+type GeminiMessage = { role: 'user' | 'model' | 'function'; parts: GeminiPart[] };
+
+async function callGemini(messages: GeminiMessage[]) {
+  const res = await fetch(GEMINI_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: messages,
+      tools: TOOLS,
+      generationConfig: { temperature: 0.4 },
+    }),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Gemini API error ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+// ── HTTP handler ────────────────────────────────────────────────────────────
+
+Deno.serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: CORS_HEADERS });
+  }
+  if (req.method !== 'POST') {
+    return new Response('Method not allowed', { status: 405, headers: CORS_HEADERS });
+  }
+
+  try {
+    const authHeader = req.headers.get('Authorization');
+    if (!authHeader) {
+      return jsonResponse({ error: 'Missing Authorization header' }, 401);
+    }
+
+    // Build a Supabase client bound to the user's JWT — RLS applies as them.
+    const sb = createClient(
+      Deno.env.get('SUPABASE_URL')!,
+      Deno.env.get('SUPABASE_ANON_KEY')!,
+      { global: { headers: { Authorization: authHeader } } }
+    );
+
+    const { data: userData, error: uErr } = await sb.auth.getUser();
+    if (uErr || !userData?.user) {
+      return jsonResponse({ error: 'Invalid auth' }, 401);
+    }
+
+    const body = await req.json().catch(() => ({}));
+    const { history = [], message } = body as {
+      history?: GeminiMessage[];
+      message: string;
+    };
+    if (typeof message !== 'string' || !message.trim()) {
+      return jsonResponse({ error: 'message is required' }, 400);
+    }
+
+    const tools = makeTools(sb, userData.user.id);
+    const messages: GeminiMessage[] = [
+      ...history,
+      { role: 'user', parts: [{ text: message }] },
+    ];
+
+    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+      const data = await callGemini(messages);
+      const candidate = data?.candidates?.[0];
+      const parts: GeminiPart[] = candidate?.content?.parts ?? [];
+      if (!parts.length) {
+        return jsonResponse({ error: 'Empty Gemini response', raw: data }, 502);
+      }
+
+      // record model turn
+      messages.push({ role: 'model', parts });
+
+      const fc = parts.find((p: any) => p.functionCall)?.['functionCall' as any] as
+        | { name: string; args: Record<string, unknown> }
+        | undefined;
+
+      if (!fc) {
+        const text = parts.map((p: any) => p.text ?? '').filter(Boolean).join('\n').trim();
+        return jsonResponse({ reply: text, history: messages });
+      }
+
+      // execute tool
+      const fn = (tools as any)[fc.name];
+      let result: unknown;
+      if (!fn) {
+        result = { error: `Unknown tool: ${fc.name}` };
+      } else {
+        try {
+          result = await fn(fc.args ?? {});
+        } catch (e) {
+          result = { error: (e as Error).message };
+        }
+      }
+
+      messages.push({
+        role: 'function',
+        parts: [{ functionResponse: { name: fc.name, response: result as any } }],
+      });
+    }
+
+    return jsonResponse({ error: 'Exceeded tool-call limit', history: messages }, 500);
+  } catch (e) {
+    return jsonResponse({ error: (e as Error).message }, 500);
+  }
+});
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
+}

@@ -13,7 +13,7 @@ import DoctorDashboard from '@/pages/DoctorDashboard';
 import BookLayout from '@/pages/book/BookLayout';
 import MyAppointments from '@/pages/book/MyAppointments';
 import NewAppointment from '@/pages/book/NewAppointment';
-import BookChatPlaceholder from '@/pages/book/BookChatPlaceholder';
+import BookingChat from '@/pages/book/BookingChat';
 
 function RootRedirect() {
   const { loading, session, profile } = useAuth();
@@ -89,7 +89,7 @@ export default function App() {
           >
             <Route index element={<MyAppointments />} />
             <Route path="new" element={<NewAppointment />} />
-            <Route path="chat" element={<BookChatPlaceholder />} />
+            <Route path="chat" element={<BookingChat />} />
           </Route>
 
           <Route path="/" element={<RootRedirect />} />
