@@ -28,18 +28,37 @@ const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const SYSTEM_PROMPT = `אתה עוזר חכם של מרפאת MediQ שעוזר ללקוחות לקבוע תורים.
+const HEBREW_DAYS = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת'];
+
+function buildSystemPrompt(): string {
+  // Israel local time (UTC+2/+3 depending on DST). Use Intl for correctness.
+  const fmt = (opts: Intl.DateTimeFormatOptions) =>
+    new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jerusalem', ...opts }).format(new Date());
+  const today = fmt({ year: 'numeric', month: '2-digit', day: '2-digit' }); // YYYY-MM-DD
+  const time = fmt({ hour: '2-digit', minute: '2-digit', hour12: false });
+  const weekday = HEBREW_DAYS[
+    new Date(today + 'T12:00:00+02:00').getDay()
+  ];
+  return `אתה עוזר חכם של מרפאת MediQ שעוזר ללקוחות לקבוע תורים.
 ענה תמיד בעברית, בטון חם, ברור וקצר.
 
-תהליך עבודה מומלץ:
-1. אם המשתמש לא בחר סוג ביקור — קרא ל-list_services והצע אפשרויות.
-2. אם המשתמש לא בחר רופא — קרא ל-list_doctors (אפשר עם service_id) והצע.
-3. כשיש לך service_id ו-doctor_id ותאריך פוטנציאלי — קרא ל-check_availability ובחר זמן ספציפי שתואם את בקשת המשתמש.
-4. אחרי שהמשתמש אישר זמן ספציפי — קרא ל-book_appointment ליצירת התור.
+מידע עדכני:
+- היום: יום ${weekday}, ${today} (שעה ${time} שעון ישראל).
+- כשהמשתמש אומר "מחר" / "השבוע" / "ביום חמישי" — חשב לפי התאריך לעיל.
+- העדף להציע תאריכים בטווח השבועיים הקרובים.
 
-תמיד תאשר עם המשתמש לפני יצירת התור (book_appointment) — ציין שם רופא, סוג ביקור, יום ושעה.
+תהליך עבודה מומלץ:
+1. אם המשתמש לא בחר סוג ביקור — קרא ל-list_services והצע 2-3 אפשרויות.
+2. אם המשתמש לא בחר רופא — קרא ל-list_doctors (אפשר עם service_id) והצע.
+3. כשיש לך service_id ו-doctor_id ותאריך פוטנציאלי — קרא ל-check_availability ובחר זמן ספציפי.
+4. אם check_availability מחזיר זמנים — הצע 2-3 אופציות מתוכם והמתן לבחירה.
+5. אם check_availability מחזיר open:false — נסה תאריך אחר באותו שבוע באופן יזום.
+6. אחרי שהמשתמש אישר זמן — קרא ל-book_appointment ליצירת התור.
+
+תמיד תאשר עם המשתמש לפני יצירת התור (book_appointment) — ציין שם רופא, סוג ביקור, יום ושעה ברורה.
 אם המשתמש מבטא דחיפות רפואית אמיתית, הצע לו לפנות ישירות למוקד או למיון.
-אל תמציא נתונים; אם אין לך מידע — קרא לכלי המתאים.`;
+אל תמציא נתונים; אם חסר לך מידע — קרא לכלי המתאים.`;
+}
 
 const TOOLS = [
   {
@@ -161,14 +180,51 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
       const duration = svc.duration_minutes as number;
       const dayDate = new Date(`${date}T00:00:00`);
       const weekday = dayDate.getDay();
-      const wh = (hours ?? []).find((h: any) => h.weekday === weekday);
 
-      if (!wh || !wh.is_open) {
-        return { date, weekday, open: false, slots: [] };
+      // Fallback to default hours if the clinic hasn't configured any:
+      // Sun-Thu 9-17, Fri 9-13, Sat closed.
+      const defaultHours: Array<{ weekday: number; start: string; end: string; open: boolean }> = [
+        { weekday: 0, start: '09:00', end: '17:00', open: true },
+        { weekday: 1, start: '09:00', end: '17:00', open: true },
+        { weekday: 2, start: '09:00', end: '17:00', open: true },
+        { weekday: 3, start: '09:00', end: '17:00', open: true },
+        { weekday: 4, start: '09:00', end: '17:00', open: true },
+        { weekday: 5, start: '09:00', end: '13:00', open: true },
+        { weekday: 6, start: '09:00', end: '17:00', open: false },
+      ];
+
+      const configured = (hours ?? []) as Array<{
+        weekday: number;
+        start_time: string | null;
+        end_time: string | null;
+        is_open: boolean;
+      }>;
+
+      let startTime: string;
+      let endTime: string;
+      let isOpen: boolean;
+
+      if (configured.length > 0) {
+        const wh = configured.find((h) => h.weekday === weekday);
+        if (!wh || !wh.is_open) {
+          return { date, weekday, open: false, slots: [], note: 'הרופא לא עובד ביום הזה' };
+        }
+        startTime = wh.start_time ?? '09:00';
+        endTime = wh.end_time ?? '17:00';
+        isOpen = true;
+      } else {
+        const def = defaultHours[weekday];
+        if (!def.open) {
+          return { date, weekday, open: false, slots: [], note: 'יום שאינו עבודה (ברירת מחדל)' };
+        }
+        startTime = def.start;
+        endTime = def.end;
+        isOpen = true;
       }
 
-      const dayStart = new Date(`${date}T${wh.start_time}`);
-      const dayEnd = new Date(`${date}T${wh.end_time}`);
+      const dayStart = new Date(`${date}T${startTime}`);
+      const dayEnd = new Date(`${date}T${endTime}`);
+      void isOpen;
 
       // existing appointments for that doctor that day
       const dayStartIso = new Date(`${date}T00:00:00Z`).toISOString();
@@ -271,7 +327,7 @@ async function callGemini(messages: GeminiMessage[]) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      systemInstruction: { parts: [{ text: buildSystemPrompt() }] },
       contents: messages,
       tools: TOOLS,
       generationConfig: { temperature: 0.4 },
