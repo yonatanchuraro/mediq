@@ -156,7 +156,7 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
             />
             <Feature
               icon={<Lock className="h-4 w-4" />}
-              title="אבטחה ברמת בנק"
+              title="אבטחה ברמה גבוהה"
               desc="Row-Level Security, JWT, ו-RBAC לכל פעולה"
             />
           </div>

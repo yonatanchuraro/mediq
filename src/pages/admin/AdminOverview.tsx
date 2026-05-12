@@ -117,27 +117,49 @@ function StatCard({
   icon: React.ReactNode;
   tint: Tint;
 }) {
-  const tintMap: Record<Tint, string> = {
-    primary: 'bg-gradient-to-br from-primary to-teal-400 shadow-primary/30',
-    indigo: 'bg-gradient-to-br from-indigo-500 to-violet-500 shadow-indigo-500/30',
-    amber: 'bg-gradient-to-br from-amber-500 to-orange-400 shadow-amber-500/30',
-    emerald: 'bg-gradient-to-br from-emerald-500 to-teal-500 shadow-emerald-500/30',
+  const tintMap: Record<Tint, { icon: string; glow: string; ring: string }> = {
+    primary: {
+      icon: 'from-primary to-teal-400',
+      glow: 'shadow-primary/30',
+      ring: 'from-primary/10 via-transparent',
+    },
+    indigo: {
+      icon: 'from-indigo-500 to-violet-500',
+      glow: 'shadow-indigo-500/30',
+      ring: 'from-indigo-500/10 via-transparent',
+    },
+    amber: {
+      icon: 'from-amber-500 to-orange-400',
+      glow: 'shadow-amber-500/30',
+      ring: 'from-amber-500/10 via-transparent',
+    },
+    emerald: {
+      icon: 'from-emerald-500 to-teal-500',
+      glow: 'shadow-emerald-500/30',
+      ring: 'from-emerald-500/10 via-transparent',
+    },
   };
+  const t = tintMap[tint];
 
   return (
-    <Card>
-      <CardContent className="flex items-center gap-4 p-5">
+    <Card className="group relative overflow-hidden transition-all hover:-translate-y-0.5 hover:shadow-lg">
+      {/* Subtle hover glow */}
+      <div
+        aria-hidden
+        className={`pointer-events-none absolute inset-0 bg-gradient-to-br ${t.ring} to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100`}
+      />
+      <CardContent className="relative flex items-center gap-4 p-5">
         <div
-          className={`flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-md ${tintMap[tint]}`}
+          className={`flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br ${t.icon} text-white shadow-md ${t.glow} ring-1 ring-white/10`}
         >
           {icon}
         </div>
-        <div>
-          <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             {label}
           </div>
-          <div className="text-2xl font-extrabold tabular-nums">
-            {loading ? '—' : value ?? 0}
+          <div className="mt-0.5 text-3xl font-extrabold tabular-nums leading-tight tracking-tight">
+            {loading ? <span className="text-muted-foreground/40">—</span> : value ?? 0}
           </div>
         </div>
       </CardContent>
