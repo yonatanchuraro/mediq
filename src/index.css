@@ -60,8 +60,11 @@
 
 @layer base {
   * { @apply border-border; }
+  html, body, #root {
+    @apply h-full;
+  }
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply overflow-hidden bg-background text-foreground antialiased;
     font-feature-settings: 'cv11';
   }
 }

@@ -173,7 +173,7 @@ export function AppShell({
         </div>
       </aside>
 
-      <main className="h-screen overflow-y-auto p-8">{children ?? <Outlet />}</main>
+      <main className="h-screen min-w-0 overflow-y-auto p-8">{children ?? <Outlet />}</main>
     </div>
   );
 }
