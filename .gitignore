@@ -1,0 +1,57 @@
+# dependencies
+node_modules
+.pnp
+.pnp.js
+
+# build output
+dist
+dist-ssr
+build
+.next
+out
+
+# env & secrets
+.env
+.env.local
+.env.*.local
+.env.production
+*.pem
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+logs
+*.log
+
+# editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+Thumbs.db
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# misc
+coverage
+*.local
+.cache
+.turbo
+.parcel-cache
+
+# Supabase local dev
+**/supabase/.branches
+**/supabase/.temp
+**/supabase/.env
+
+# data / dumps
+*.sqlite
+*.db
+*.db-journal
+data.db
