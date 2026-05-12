@@ -7,6 +7,7 @@ import SignupPage from '@/pages/SignupPage';
 import AdminLayout from '@/pages/admin/AdminLayout';
 import AdminOverview from '@/pages/admin/AdminOverview';
 import AdminServices from '@/pages/admin/AdminServices';
+import AdminDoctors from '@/pages/admin/AdminDoctors';
 import AdminPlaceholder from '@/pages/admin/AdminPlaceholder';
 import DoctorDashboard from '@/pages/DoctorDashboard';
 import ClientDashboard from '@/pages/ClientDashboard';
@@ -46,15 +47,7 @@ export default function App() {
           >
             <Route index element={<AdminOverview />} />
             <Route path="services" element={<AdminServices />} />
-            <Route
-              path="doctors"
-              element={
-                <AdminPlaceholder
-                  title="רופאים"
-                  description="ניהול רופאים, התמחויות וזמינות"
-                />
-              }
-            />
+            <Route path="doctors" element={<AdminDoctors />} />
             <Route
               path="appointments"
               element={
