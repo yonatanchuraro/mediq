@@ -20,7 +20,23 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.47.10';
 const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY')!;
 const GEMINI_MODEL = 'gemini-2.0-flash';
 const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-const MAX_TOOL_ROUNDS = 6;
+const MAX_TOOL_ROUNDS = 4;          // was 6 — most flows finish in 2-3
+const HISTORY_LIMIT = 12;            // tail-truncate to keep prompts small
+const CACHE_TTL_MS = 60_000;         // 60s for services / doctors / specialties
+
+// Module-level cache shared across invocations within the same Function
+// instance — Edge Functions stay warm for a few minutes so this saves
+// repeat round-trips to Postgres for data that barely changes.
+type CacheEntry = { data: unknown; at: number };
+const cache = new Map<string, CacheEntry>();
+
+async function cached<T>(key: string, loader: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.data as T;
+  const data = await loader();
+  cache.set(key, { data, at: Date.now() });
+  return data;
+}
 
 const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
@@ -120,37 +136,47 @@ const TOOLS = [
 function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
   return {
     async list_services(): Promise<unknown> {
-      const { data, error } = await sb
-        .from('services')
-        .select('id, name, description, duration_minutes, price_cents')
-        .eq('active', true)
-        .order('name');
-      if (error) return { error: error.message };
-      return { services: data };
+      return await cached('services', async () => {
+        const { data, error } = await sb
+          .from('services')
+          .select('id, name, description, duration_minutes, price_cents, specialty_id')
+          .eq('active', true)
+          .order('name');
+        if (error) return { error: error.message };
+        return { services: data };
+      });
     },
 
     async list_doctors({ service_id }: { service_id?: string }): Promise<unknown> {
-      let query = sb
-        .from('doctors')
-        .select(
-          'profile_id, bio, profile:profiles!profile_id(full_name), specialty:specialties!specialty_id(name)'
-        )
-        .eq('active', true);
+      // All doctors are cached together; the service filter is applied
+      // in-memory using the cached doctor_services map.
+      const allDoctors = await cached('doctors', async () => {
+        const { data, error } = await sb
+          .from('doctors')
+          .select(
+            'profile_id, bio, profile:profiles!profile_id(full_name), specialty:specialties!specialty_id(name)'
+          )
+          .eq('active', true);
+        if (error) throw error;
+        return data ?? [];
+      });
 
+      let filtered = allDoctors as any[];
       if (service_id) {
-        const { data: dsRows, error: dsErr } = await sb
-          .from('doctor_services')
-          .select('doctor_id')
-          .eq('service_id', service_id);
-        if (dsErr) return { error: dsErr.message };
-        const allowed = (dsRows ?? []).map((r: any) => r.doctor_id);
-        if (allowed.length > 0) {
-          query = query.in('profile_id', allowed);
-        }
+        const dsRows = await cached('doctor_services', async () => {
+          const { data, error } = await sb
+            .from('doctor_services')
+            .select('doctor_id, service_id');
+          if (error) throw error;
+          return data ?? [];
+        });
+        const allowed = new Set(
+          (dsRows as any[])
+            .filter((r) => r.service_id === service_id)
+            .map((r) => r.doctor_id)
+        );
+        if (allowed.size > 0) filtered = filtered.filter((d) => allowed.has(d.profile_id));
       }
-
-      const { data, error } = await query;
-      if (error) return { error: error.message };
 
       const extractField = (val: any, field: string): string | null => {
         if (!val) return null;
@@ -159,7 +185,7 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
       };
 
       return {
-        doctors: (data ?? []).map((d: any) => ({
+        doctors: filtered.map((d: any) => ({
           id: d.profile_id,
           name: extractField(d.profile, 'full_name'),
           specialty: extractField(d.specialty, 'name'),
@@ -389,8 +415,11 @@ Deno.serve(async (req) => {
     }
 
     const tools = makeTools(sb, userData.user.id);
+    // Tail-truncate history to the last HISTORY_LIMIT messages so the prompt
+    // stays small. We preserve any tool-call/response pairs at the boundary.
+    const trimmedHistory = history.slice(-HISTORY_LIMIT);
     const messages: GeminiMessage[] = [
-      ...history,
+      ...trimmedHistory,
       { role: 'user', parts: [{ text: message }] },
     ];
 
