@@ -198,19 +198,30 @@ export default function AdminAppointments() {
                     </Button>
                   </>
                 )}
-                {selected.status === 'confirmed' && (
-                  <>
-                    <Button variant="outline" onClick={() => changeStatus('no_show', 'סומן כלא הגיע')}>
-                      לא הגיע
-                    </Button>
-                    <Button variant="outline" onClick={() => changeStatus('cancelled', 'התור בוטל')}>
-                      בטל תור
-                    </Button>
-                    <Button onClick={() => changeStatus('completed', 'התור סומן כהושלם')}>
-                      סמן כהושלם
-                    </Button>
-                  </>
-                )}
+                {selected.status === 'confirmed' && (() => {
+                  const started = new Date(selected.start_at).getTime() <= Date.now();
+                  return (
+                    <>
+                      {started && (
+                        <Button variant="outline" onClick={() => changeStatus('no_show', 'סומן כלא הגיע')}>
+                          לא הגיע
+                        </Button>
+                      )}
+                      <Button variant="outline" onClick={() => changeStatus('cancelled', 'התור בוטל')}>
+                        בטל תור
+                      </Button>
+                      {started ? (
+                        <Button onClick={() => changeStatus('completed', 'התור סומן כהושלם')}>
+                          סמן כהושלם
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          ניתן לסמן כהושלם רק אחרי שהתור החל
+                        </span>
+                      )}
+                    </>
+                  );
+                })()}
                 {(selected.status === 'cancelled' || selected.status === 'completed' || selected.status === 'no_show') && (
                   <Button
                     variant="outline"
