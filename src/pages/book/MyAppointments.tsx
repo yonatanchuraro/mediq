@@ -17,7 +17,8 @@ interface AppointmentRow {
   status: AppointmentStatus;
   notes: string | null;
   service: { name: string; duration_minutes: number };
-  doctor: { full_name: string; phone: string | null };
+  // doctor_id FK → doctors.profile_id → profiles.id (two hops, see select below)
+  doctor: { profile: { full_name: string; phone: string | null } };
 }
 
 const STATUS_LABELS: Record<AppointmentStatus, { label: string; className: string }> = {
@@ -36,10 +37,17 @@ export default function MyAppointments() {
   async function load() {
     if (!user) return;
     setLoading(true);
+    // appointments.doctor_id FK is on doctors(profile_id), so we hop through
+    // doctors to reach profiles. The direct join `profiles!doctor_id` errors
+    // with "Could not find a relationship between appointments and profiles".
     const { data, error } = await supabase
       .from('appointments')
       .select(
-        '*, service:services!service_id(name, duration_minutes), doctor:profiles!doctor_id(full_name, phone)'
+        `*,
+         service:services!service_id(name, duration_minutes),
+         doctor:doctors!doctor_id(
+           profile:profiles!profile_id(full_name, phone)
+         )`
       )
       .eq('client_id', user.id)
       .order('start_at', { ascending: false });
@@ -178,7 +186,7 @@ function AppointmentCard({
             </span>
             <span className="inline-flex items-center gap-1">
               <Stethoscope className="h-3.5 w-3.5" />
-              {a.doctor.full_name}
+              {a.doctor?.profile?.full_name ?? 'רופא'}
             </span>
           </div>
           {a.notes && (
