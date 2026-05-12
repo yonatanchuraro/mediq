@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -37,6 +37,7 @@ export default function NewAppointment() {
 
   const [services, setServices] = useState<Service[]>([]);
   const [doctors, setDoctors] = useState<DoctorOption[]>([]);
+  const [doctorServices, setDoctorServices] = useState<{ doctor_id: string; service_id: string }[]>([]);
   const [loadingMeta, setLoadingMeta] = useState(true);
 
   const [serviceId, setServiceId] = useState('');
@@ -49,15 +50,19 @@ export default function NewAppointment() {
     let cancelled = false;
     (async () => {
       try {
-        const [{ data: svcs, error: svcErr }, { data: docs, error: docErr }] =
-          await Promise.all([
-            supabase.from('services').select('*').eq('active', true).order('name'),
-            supabase
-              .from('doctors')
-              .select('profile_id, specialty, bio, profile:profiles!profile_id(full_name)')
-              .eq('active', true)
-              .order('created_at', { ascending: false }),
-          ]);
+        const [
+          { data: svcs, error: svcErr },
+          { data: docs, error: docErr },
+          { data: ds, error: dsErr },
+        ] = await Promise.all([
+          supabase.from('services').select('*').eq('active', true).order('name'),
+          supabase
+            .from('doctors')
+            .select('profile_id, specialty, bio, profile:profiles!profile_id(full_name)')
+            .eq('active', true)
+            .order('created_at', { ascending: false }),
+          supabase.from('doctor_services').select('doctor_id, service_id'),
+        ]);
         if (cancelled) return;
         if (svcErr) {
           console.error('[NewAppointment] services error:', svcErr);
@@ -67,8 +72,12 @@ export default function NewAppointment() {
           console.error('[NewAppointment] doctors error:', docErr);
           toast.error(`טעינת רופאים נכשלה: ${docErr.message}`);
         }
+        if (dsErr) {
+          console.error('[NewAppointment] doctor_services error:', dsErr);
+        }
         setServices((svcs ?? []) as Service[]);
         setDoctors((docs ?? []) as unknown as DoctorOption[]);
+        setDoctorServices((ds ?? []) as { doctor_id: string; service_id: string }[]);
       } catch (e) {
         if (cancelled) return;
         console.error('[NewAppointment] load failed:', e);
@@ -83,6 +92,25 @@ export default function NewAppointment() {
   }, []);
 
   const selectedService = services.find((s) => s.id === serviceId);
+
+  // Filter doctors by the chosen service. If no doctor_services mapping
+  // exists for that service yet, fall back to all doctors so the form
+  // doesn't become unusable.
+  const filteredDoctors = useMemo(() => {
+    if (!serviceId) return doctors;
+    const allowed = new Set(
+      doctorServices.filter((m) => m.service_id === serviceId).map((m) => m.doctor_id)
+    );
+    if (allowed.size === 0) return doctors;
+    return doctors.filter((d) => allowed.has(d.profile_id));
+  }, [doctors, doctorServices, serviceId]);
+
+  // Reset doctor selection when service changes and current doctor isn't compatible.
+  useEffect(() => {
+    if (doctorId && !filteredDoctors.some((d) => d.profile_id === doctorId)) {
+      setDoctorId('');
+    }
+  }, [filteredDoctors, doctorId]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -181,7 +209,7 @@ export default function NewAppointment() {
                     <SelectValue placeholder="בחר רופא" />
                   </SelectTrigger>
                   <SelectContent>
-                    {doctors.map((d) => (
+                    {filteredDoctors.map((d) => (
                       <SelectItem key={d.profile_id} value={d.profile_id}>
                         {doctorName(d)}
                         {d.specialty ? ` · ${d.specialty}` : ''}

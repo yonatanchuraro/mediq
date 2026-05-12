@@ -100,26 +100,14 @@ export default function DoctorCalendar() {
     }).length;
   }, [rows]);
 
-  async function cancelAppointment() {
+  async function changeStatus(status: AppointmentStatus, successMsg: string) {
     if (!selected) return;
     const { error } = await supabase
       .from('appointments')
-      .update({ status: 'cancelled' })
+      .update({ status })
       .eq('id', selected.id);
     if (error) return toast.error(error.message);
-    toast.success('התור בוטל');
-    setSelectedId(null);
-    reload();
-  }
-
-  async function completeAppointment() {
-    if (!selected) return;
-    const { error } = await supabase
-      .from('appointments')
-      .update({ status: 'completed' })
-      .eq('id', selected.id);
-    if (error) return toast.error(error.message);
-    toast.success('התור סומן כהושלם');
+    toast.success(successMsg);
     setSelectedId(null);
     reload();
   }
@@ -171,13 +159,28 @@ export default function DoctorCalendar() {
                 <Row label="סטטוס">{STATUS_HE[selected.status]}</Row>
                 {selected.notes && <Row label="הערות">{selected.notes}</Row>}
               </div>
-              <DialogFooter>
-                {selected.status !== 'cancelled' && selected.status !== 'completed' && (
+              <DialogFooter className="flex-wrap gap-2 sm:justify-end">
+                {selected.status === 'pending' && (
                   <>
-                    <Button variant="outline" onClick={cancelAppointment}>
+                    <Button variant="outline" onClick={() => changeStatus('cancelled', 'התור בוטל')}>
                       בטל תור
                     </Button>
-                    <Button onClick={completeAppointment}>סמן כהושלם</Button>
+                    <Button onClick={() => changeStatus('confirmed', 'התור אושר')}>
+                      אשר תור
+                    </Button>
+                  </>
+                )}
+                {selected.status === 'confirmed' && (
+                  <>
+                    <Button variant="outline" onClick={() => changeStatus('no_show', 'סומן כלא הגיע')}>
+                      לא הגיע
+                    </Button>
+                    <Button variant="outline" onClick={() => changeStatus('cancelled', 'התור בוטל')}>
+                      בטל תור
+                    </Button>
+                    <Button onClick={() => changeStatus('completed', 'התור סומן כהושלם')}>
+                      סמן כהושלם
+                    </Button>
                   </>
                 )}
               </DialogFooter>
