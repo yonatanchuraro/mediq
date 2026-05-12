@@ -80,12 +80,22 @@ export default function MyAppointments() {
 
   async function cancel(id: string) {
     if (!confirm('לבטל את התור?')) return;
-    const { error } = await supabase
+    // Adding .select() so we can detect the silent-RLS case: update
+    // succeeds at the SQL level but affects zero rows because the policy
+    // USING clause didn't match. Without this we get a fake "success".
+    const { data, error } = await supabase
       .from('appointments')
       .update({ status: 'cancelled' })
-      .eq('id', id);
+      .eq('id', id)
+      .select('id, status');
     if (error) {
-      toast.error(error.message);
+      console.error('[cancel] update error:', error);
+      toast.error(`ביטול נכשל: ${error.message}`);
+      return;
+    }
+    if (!data || data.length === 0) {
+      console.warn('[cancel] zero rows updated — RLS likely blocked');
+      toast.error('לא ניתן לבטל את התור הזה — ייתכן שהוא כבר בוטל או שאין לך הרשאה');
       return;
     }
     toast.success('התור בוטל');
@@ -195,17 +205,19 @@ function AppointmentCard({
             </div>
           )}
         </div>
-        {onCancel && !isPast(a.start_at) && a.status !== 'cancelled' && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onCancel}
-            className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          >
-            <X className="h-4 w-4" />
-            בטל
-          </Button>
-        )}
+        {onCancel &&
+          !isPast(a.start_at) &&
+          (a.status === 'pending' || a.status === 'confirmed') && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onCancel}
+              className="text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              <X className="h-4 w-4" />
+              בטל
+            </Button>
+          )}
       </CardContent>
     </Card>
   );
