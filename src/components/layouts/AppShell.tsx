@@ -55,7 +55,7 @@ export function AppShell({
     >
       <aside
         className={cn(
-          'relative flex h-screen flex-col overflow-y-auto border-l bg-card p-3 transition-all duration-300',
+          'relative flex h-screen flex-col overflow-hidden border-l bg-card p-3 transition-all duration-300',
           collapsed ? 'items-center' : 'items-stretch p-4'
         )}
       >
