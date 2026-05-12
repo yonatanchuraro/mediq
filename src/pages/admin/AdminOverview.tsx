@@ -20,20 +20,26 @@ export default function AdminOverview() {
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const [services, doctors, clients, appointments] = await Promise.all([
-        supabase.from('services').select('*', { count: 'exact', head: true }).eq('active', true),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'doctor'),
-        supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'client'),
-        supabase.from('appointments').select('*', { count: 'exact', head: true }),
-      ]);
-      if (!mounted) return;
-      setStats({
-        services: services.count ?? 0,
-        doctors: doctors.count ?? 0,
-        clients: clients.count ?? 0,
-        appointments: appointments.count ?? 0,
-      });
-      setLoading(false);
+      try {
+        const [services, doctors, clients, appointments] = await Promise.all([
+          supabase.from('services').select('*', { count: 'exact', head: true }).eq('active', true),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'doctor'),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('role', 'client'),
+          supabase.from('appointments').select('*', { count: 'exact', head: true }),
+        ]);
+        if (!mounted) return;
+        setStats({
+          services: services.count ?? 0,
+          doctors: doctors.count ?? 0,
+          clients: clients.count ?? 0,
+          appointments: appointments.count ?? 0,
+        });
+      } catch (e) {
+        console.error('[AdminOverview] stats failed:', e);
+        if (mounted) setStats({ services: 0, doctors: 0, clients: 0, appointments: 0 });
+      } finally {
+        if (mounted) setLoading(false);
+      }
     })();
     return () => {
       mounted = false;

@@ -24,7 +24,11 @@ interface DoctorOption {
   profile_id: string;
   specialty: string | null;
   bio: string | null;
-  profile: { full_name: string };
+  profile: { full_name: string | null } | null;
+}
+
+function doctorName(d: DoctorOption): string {
+  return d.profile?.full_name?.trim() || 'רופא';
 }
 
 export default function NewAppointment() {
@@ -42,21 +46,40 @@ export default function NewAppointment() {
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const [{ data: svcs, error: svcErr }, { data: docs, error: docErr }] = await Promise.all([
-        supabase.from('services').select('*').eq('active', true).order('name'),
-        supabase
-          .from('doctors')
-          .select('profile_id, specialty, bio, profile:profiles!profile_id(full_name)')
-          .eq('active', true)
-          .order('created_at', { ascending: false }),
-      ]);
-      if (svcErr) toast.error(svcErr.message);
-      if (docErr) toast.error(docErr.message);
-      setServices((svcs ?? []) as Service[]);
-      setDoctors((docs ?? []) as unknown as DoctorOption[]);
-      setLoadingMeta(false);
+      try {
+        const [{ data: svcs, error: svcErr }, { data: docs, error: docErr }] =
+          await Promise.all([
+            supabase.from('services').select('*').eq('active', true).order('name'),
+            supabase
+              .from('doctors')
+              .select('profile_id, specialty, bio, profile:profiles!profile_id(full_name)')
+              .eq('active', true)
+              .order('created_at', { ascending: false }),
+          ]);
+        if (cancelled) return;
+        if (svcErr) {
+          console.error('[NewAppointment] services error:', svcErr);
+          toast.error(`טעינת שירותים נכשלה: ${svcErr.message}`);
+        }
+        if (docErr) {
+          console.error('[NewAppointment] doctors error:', docErr);
+          toast.error(`טעינת רופאים נכשלה: ${docErr.message}`);
+        }
+        setServices((svcs ?? []) as Service[]);
+        setDoctors((docs ?? []) as unknown as DoctorOption[]);
+      } catch (e) {
+        if (cancelled) return;
+        console.error('[NewAppointment] load failed:', e);
+        toast.error(e instanceof Error ? e.message : 'טעינה נכשלה');
+      } finally {
+        if (!cancelled) setLoadingMeta(false);
+      }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const selectedService = services.find((s) => s.id === serviceId);
@@ -160,7 +183,7 @@ export default function NewAppointment() {
                   <SelectContent>
                     {doctors.map((d) => (
                       <SelectItem key={d.profile_id} value={d.profile_id}>
-                        {d.profile.full_name}
+                        {doctorName(d)}
                         {d.specialty ? ` · ${d.specialty}` : ''}
                       </SelectItem>
                     ))}

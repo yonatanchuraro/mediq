@@ -21,8 +21,12 @@ import { PageHeader } from '@/components/layouts/AppShell';
 import { cn } from '@/lib/utils';
 
 type DoctorRow = Doctor & {
-  profile: Pick<Profile, 'id' | 'full_name' | 'email' | 'phone'>;
+  profile: Pick<Profile, 'id' | 'full_name' | 'email' | 'phone'> | null;
 };
+
+function doctorDisplayName(d: DoctorRow): string {
+  return d.profile?.full_name?.trim() || d.profile?.email || 'רופא';
+}
 
 interface DoctorFieldsState {
   specialty: string;
@@ -75,13 +79,23 @@ export default function AdminDoctors() {
 
   async function load() {
     setLoading(true);
-    const { data, error } = await supabase
-      .from('doctors')
-      .select('*, profile:profiles!profile_id(id, full_name, email, phone)')
-      .order('created_at', { ascending: false });
-    if (error) toast.error(error.message);
-    else setDoctors((data ?? []) as DoctorRow[]);
-    setLoading(false);
+    try {
+      const { data, error } = await supabase
+        .from('doctors')
+        .select('*, profile:profiles!profile_id(id, full_name, email, phone)')
+        .order('created_at', { ascending: false });
+      if (error) {
+        console.error('[AdminDoctors] load error:', error);
+        toast.error(error.message);
+      } else {
+        setDoctors((data ?? []) as DoctorRow[]);
+      }
+    } catch (e) {
+      console.error('[AdminDoctors] load threw:', e);
+      toast.error(e instanceof Error ? e.message : 'טעינה נכשלה');
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -245,14 +259,16 @@ export default function AdminDoctors() {
                 {doctors.map((d) => (
                   <tr key={d.profile_id} className="hover:bg-muted/30">
                     <td className="px-6 py-4">
-                      <div className="font-medium">{d.profile.full_name}</div>
-                      <div className="text-xs text-muted-foreground">{d.profile.email}</div>
+                      <div className="font-medium">{doctorDisplayName(d)}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {d.profile?.email ?? '—'}
+                      </div>
                     </td>
                     <td className="px-6 py-4">
                       {d.specialty || <span className="text-muted-foreground/60">—</span>}
                     </td>
                     <td className="px-6 py-4 text-muted-foreground">
-                      {d.profile.phone ? <div>📞 {d.profile.phone}</div> : null}
+                      {d.profile?.phone ? <div>📞 {d.profile.phone}</div> : null}
                       {d.license_number ? (
                         <div className="text-xs">רישיון: {d.license_number}</div>
                       ) : null}
@@ -287,7 +303,8 @@ export default function AdminDoctors() {
           <DialogHeader>
             <DialogTitle>עריכת רופא</DialogTitle>
             <DialogDescription>
-              {editing?.profile.full_name} · {editing?.profile.email}
+              {editing ? doctorDisplayName(editing) : ''}
+              {editing?.profile?.email ? ` · ${editing.profile.email}` : ''}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={submitEdit} className="space-y-4">
