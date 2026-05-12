@@ -90,8 +90,15 @@ export function AppShell({
           {collapsed ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </button>
 
-        {/* Nav */}
-        <nav className={cn('flex flex-1 flex-col gap-1', collapsed && 'w-full items-center')}>
+        {/* Nav — uses min-h-0 so it can shrink instead of forcing the
+            sidebar to overflow; scrollbar is suppressed visually since six
+            nav items fit comfortably in any reasonable viewport. */}
+        <nav
+          className={cn(
+            'flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto no-scrollbar',
+            collapsed && 'w-full items-center'
+          )}
+        >
           {nav.map((item) => (
             <NavLink
               key={item.to}

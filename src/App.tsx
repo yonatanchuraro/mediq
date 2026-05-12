@@ -23,18 +23,27 @@ import BookingChat from '@/pages/book/BookingChat';
 function RootRedirect() {
   const { loading, session, profile } = useAuth();
 
+  // Wait for both the auth context bootstrap AND for the profile lookup to
+  // finish, otherwise we race: signIn() returns → onAuthStateChange has set
+  // session but loadProfile is still in flight → profile is null → we'd
+  // fall through to /book for an admin. The loader bridges those few ms.
   if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        טוען…
-      </div>
-    );
+    return <CenterLoader />;
   }
   if (!session) return <Navigate to="/login" replace />;
-  if (profile?.role === 'admin') return <Navigate to="/admin" replace />;
-  if (profile?.role === 'doctor') return <Navigate to="/doctor" replace />;
+  if (!profile) return <CenterLoader />;
+  if (profile.role === 'admin') return <Navigate to="/admin" replace />;
+  if (profile.role === 'doctor') return <Navigate to="/doctor" replace />;
   return <Navigate to="/book" replace />;
+}
+
+function CenterLoader() {
+  return (
+    <div className="flex h-screen items-center justify-center gap-2 text-muted-foreground">
+      <Loader2 className="h-4 w-4 animate-spin" />
+      טוען…
+    </div>
+  );
 }
 
 export default function App() {
