@@ -18,19 +18,40 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { PageHeader } from '@/components/layouts/AppShell';
+import { cn } from '@/lib/utils';
 
 type DoctorRow = Doctor & {
   profile: Pick<Profile, 'id' | 'full_name' | 'email' | 'phone'>;
 };
 
-interface EditState {
+interface DoctorFieldsState {
   specialty: string;
   bio: string;
   license_number: string;
   active: boolean;
 }
 
-const emptyEdit: EditState = { specialty: '', bio: '', license_number: '', active: true };
+interface CreateFormState extends DoctorFieldsState {
+  email: string;
+  password: string;
+  full_name: string;
+  phone: string;
+}
+
+const emptyFields: DoctorFieldsState = {
+  specialty: '',
+  bio: '',
+  license_number: '',
+  active: true,
+};
+
+const emptyCreate: CreateFormState = {
+  ...emptyFields,
+  email: '',
+  password: '',
+  full_name: '',
+  phone: '',
+};
 
 export default function AdminDoctors() {
   const [doctors, setDoctors] = useState<DoctorRow[]>([]);
@@ -38,16 +59,19 @@ export default function AdminDoctors() {
 
   // edit
   const [editing, setEditing] = useState<DoctorRow | null>(null);
-  const [editForm, setEditForm] = useState<EditState>(emptyEdit);
+  const [editForm, setEditForm] = useState<DoctorFieldsState>(emptyFields);
   const [editOpen, setEditOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
 
-  // promote
-  const [promoteOpen, setPromoteOpen] = useState(false);
+  // add (create or promote)
+  const [addOpen, setAddOpen] = useState(false);
+  const [mode, setMode] = useState<'create' | 'promote'>('create');
+  const [createForm, setCreateForm] = useState<CreateFormState>(emptyCreate);
   const [promoteEmail, setPromoteEmail] = useState('');
   const [foundProfile, setFoundProfile] = useState<Profile | null>(null);
+  const [promoteForm, setPromoteForm] = useState<DoctorFieldsState>(emptyFields);
   const [searching, setSearching] = useState(false);
-  const [promoteForm, setPromoteForm] = useState<EditState>(emptyEdit);
+
+  const [saving, setSaving] = useState(false);
 
   async function load() {
     setLoading(true);
@@ -55,11 +79,8 @@ export default function AdminDoctors() {
       .from('doctors')
       .select('*, profile:profiles!profile_id(id, full_name, email, phone)')
       .order('created_at', { ascending: false });
-    if (error) {
-      toast.error(error.message);
-    } else {
-      setDoctors((data ?? []) as DoctorRow[]);
-    }
+    if (error) toast.error(error.message);
+    else setDoctors((data ?? []) as DoctorRow[]);
     setLoading(false);
   }
 
@@ -67,7 +88,7 @@ export default function AdminDoctors() {
     load();
   }, []);
 
-  // ── Edit ──────────────────────────────────────────────
+  // ── Edit existing doctor ─────────────────────────────────────
   function openEdit(d: DoctorRow) {
     setEditing(d);
     setEditForm({
@@ -93,21 +114,20 @@ export default function AdminDoctors() {
       })
       .eq('profile_id', editing.profile_id);
     setSaving(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
+    if (error) return toast.error(error.message);
     toast.success('הרופא עודכן');
     setEditOpen(false);
     load();
   }
 
-  // ── Promote a user to doctor ──────────────────────────
-  function openPromote() {
+  // ── Add (create or promote) ──────────────────────────────────
+  function openAdd() {
+    setMode('create');
+    setCreateForm(emptyCreate);
     setPromoteEmail('');
     setFoundProfile(null);
-    setPromoteForm(emptyEdit);
-    setPromoteOpen(true);
+    setPromoteForm(emptyFields);
+    setAddOpen(true);
   }
 
   async function searchProfile() {
@@ -121,19 +141,39 @@ export default function AdminDoctors() {
       .ilike('email', email)
       .maybeSingle();
     setSearching(false);
-    if (error) {
-      toast.error(error.message);
-      return;
-    }
-    if (!data) {
-      toast.error('לא נמצא משתמש עם המייל הזה. שיירשם דרך /signup קודם.');
-      return;
-    }
-    if (data.role === 'doctor') {
-      toast.error('המשתמש כבר רופא');
-      return;
-    }
+    if (error) return toast.error(error.message);
+    if (!data) return toast.error('לא נמצא משתמש עם המייל הזה');
+    if (data.role === 'doctor') return toast.error('המשתמש כבר רופא');
     setFoundProfile(data as Profile);
+  }
+
+  async function submitCreate(e: React.FormEvent) {
+    e.preventDefault();
+    if (!createForm.email.trim() || !createForm.password || !createForm.full_name.trim()) {
+      toast.error('מייל, סיסמה ושם מלא הם חובה');
+      return;
+    }
+    setSaving(true);
+    const { data, error } = await supabase.functions.invoke('admin-create-doctor', {
+      body: {
+        email: createForm.email.trim().toLowerCase(),
+        password: createForm.password,
+        full_name: createForm.full_name.trim(),
+        phone: createForm.phone.trim() || undefined,
+        specialty: createForm.specialty.trim() || undefined,
+        bio: createForm.bio.trim() || undefined,
+        license_number: createForm.license_number.trim() || undefined,
+      },
+    });
+    setSaving(false);
+    if (error || (data as any)?.error) {
+      const msg = (data as any)?.error ?? error?.message ?? 'יצירה נכשלה';
+      toast.error(msg);
+      return;
+    }
+    toast.success(`${createForm.full_name} נוצר כרופא`);
+    setAddOpen(false);
+    load();
   }
 
   async function submitPromote(e: React.FormEvent) {
@@ -147,8 +187,7 @@ export default function AdminDoctors() {
       .eq('id', foundProfile.id);
     if (roleErr) {
       setSaving(false);
-      toast.error(`לא הצלחנו לעדכן role: ${roleErr.message}`);
-      return;
+      return toast.error(`עדכון role נכשל: ${roleErr.message}`);
     }
 
     const { error: insertErr } = await supabase.from('doctors').insert({
@@ -161,13 +200,11 @@ export default function AdminDoctors() {
 
     setSaving(false);
     if (insertErr) {
-      // try to rollback role change
       await supabase.from('profiles').update({ role: 'client' }).eq('id', foundProfile.id);
-      toast.error(`לא הצלחנו ליצור רשומת רופא: ${insertErr.message}`);
-      return;
+      return toast.error(`יצירת רשומת רופא נכשלה: ${insertErr.message}`);
     }
     toast.success(`${foundProfile.full_name} קודם לרופא`);
-    setPromoteOpen(false);
+    setAddOpen(false);
     load();
   }
 
@@ -177,7 +214,7 @@ export default function AdminDoctors() {
         title="רופאים"
         description="ניהול רופאי המרפאה — התמחות, ביו, רישיון וסטטוס"
         action={
-          <Button onClick={openPromote}>
+          <Button onClick={openAdd}>
             <UserPlus className="h-4 w-4" />
             הוסף רופא
           </Button>
@@ -192,7 +229,7 @@ export default function AdminDoctors() {
               טוען…
             </div>
           ) : doctors.length === 0 ? (
-            <EmptyState onAdd={openPromote} />
+            <EmptyState onAdd={openAdd} />
           ) : (
             <table className="w-full text-sm">
               <thead className="border-b bg-muted/30">
@@ -256,12 +293,7 @@ export default function AdminDoctors() {
           <form onSubmit={submitEdit} className="space-y-4">
             <DoctorFields form={editForm} setForm={setEditForm} />
             <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setEditOpen(false)}
-                disabled={saving}
-              >
+              <Button type="button" variant="outline" onClick={() => setEditOpen(false)} disabled={saving}>
                 ביטול
               </Button>
               <Button type="submit" disabled={saving}>
@@ -273,76 +305,156 @@ export default function AdminDoctors() {
         </DialogContent>
       </Dialog>
 
-      {/* Promote dialog */}
-      <Dialog open={promoteOpen} onOpenChange={setPromoteOpen}>
-        <DialogContent>
+      {/* Add dialog with mode switch */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>הוספת רופא</DialogTitle>
             <DialogDescription>
-              המשתמש צריך להירשם קודם דרך עמוד ההרשמה. כאן מוצאים אותו לפי מייל וקובעים אותו כרופא.
+              צור חשבון חדש לרופא, או קדם משתמש קיים מתוך מאגר המטופלים.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitPromote} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="searchEmail">חיפוש לפי מייל</Label>
-              <div className="flex gap-2">
-                <Input
-                  id="searchEmail"
-                  type="email"
-                  value={promoteEmail}
-                  onChange={(e) => setPromoteEmail(e.target.value)}
-                  placeholder="doctor@example.com"
-                  disabled={!!foundProfile}
-                />
-                {!foundProfile && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={searchProfile}
-                    disabled={searching || !promoteEmail.trim()}
-                  >
-                    {searching ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <Search className="h-4 w-4" />
-                    )}
-                    חפש
-                  </Button>
-                )}
-              </div>
-            </div>
 
-            {foundProfile && (
-              <>
-                <div className="rounded-md border bg-muted/30 p-3 text-sm">
-                  <div className="font-medium">{foundProfile.full_name}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {foundProfile.email}
-                    {foundProfile.phone ? ` · ${foundProfile.phone}` : ''}
-                  </div>
-                  <div className="mt-1 text-xs text-muted-foreground">
-                    תפקיד נוכחי: {foundProfile.role === 'client' ? 'מטופל' : foundProfile.role}
-                  </div>
+          <div className="flex gap-1 rounded-lg bg-muted p-1">
+            <button
+              type="button"
+              onClick={() => setMode('create')}
+              className={cn(
+                'flex-1 rounded-md px-3 py-2 text-sm font-medium transition',
+                mode === 'create' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+              )}
+            >
+              חשבון חדש
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('promote')}
+              className={cn(
+                'flex-1 rounded-md px-3 py-2 text-sm font-medium transition',
+                mode === 'promote' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground'
+              )}
+            >
+              קידום משתמש קיים
+            </button>
+          </div>
+
+          {mode === 'create' ? (
+            <form onSubmit={submitCreate} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="cf_name">שם מלא</Label>
+                  <Input
+                    id="cf_name"
+                    value={createForm.full_name}
+                    onChange={(e) => setCreateForm({ ...createForm, full_name: e.target.value })}
+                    required
+                  />
                 </div>
-                <DoctorFields form={promoteForm} setForm={setPromoteForm} />
-              </>
-            )}
+                <div className="space-y-2">
+                  <Label htmlFor="cf_phone">טלפון</Label>
+                  <Input
+                    id="cf_phone"
+                    type="tel"
+                    value={createForm.phone}
+                    onChange={(e) => setCreateForm({ ...createForm, phone: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cf_email">מייל</Label>
+                <Input
+                  id="cf_email"
+                  type="email"
+                  value={createForm.email}
+                  onChange={(e) => setCreateForm({ ...createForm, email: e.target.value })}
+                  required
+                  autoComplete="off"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="cf_password">סיסמה ראשונית (יוכל להחליף אחר כך)</Label>
+                <Input
+                  id="cf_password"
+                  type="text"
+                  value={createForm.password}
+                  onChange={(e) => setCreateForm({ ...createForm, password: e.target.value })}
+                  minLength={6}
+                  required
+                  autoComplete="off"
+                  placeholder="לפחות 6 תווים"
+                />
+                <p className="text-xs text-muted-foreground">
+                  זה מה שתמסור לרופא כדי שיתחבר בפעם הראשונה.
+                </p>
+              </div>
+              <DoctorFields
+                form={createForm}
+                setForm={(f) => setCreateForm({ ...createForm, ...f })}
+              />
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={saving}>
+                  ביטול
+                </Button>
+                <Button type="submit" disabled={saving}>
+                  {saving && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
+                  צור רופא
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : (
+            <form onSubmit={submitPromote} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="pf_email">חיפוש לפי מייל</Label>
+                <div className="flex gap-2">
+                  <Input
+                    id="pf_email"
+                    type="email"
+                    value={promoteEmail}
+                    onChange={(e) => setPromoteEmail(e.target.value)}
+                    placeholder="user@example.com"
+                    disabled={!!foundProfile}
+                  />
+                  {!foundProfile && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={searchProfile}
+                      disabled={searching || !promoteEmail.trim()}
+                    >
+                      {searching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                      חפש
+                    </Button>
+                  )}
+                </div>
+              </div>
 
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setPromoteOpen(false)}
-                disabled={saving}
-              >
-                ביטול
-              </Button>
-              <Button type="submit" disabled={!foundProfile || saving}>
-                {saving && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
-                קדם לרופא
-              </Button>
-            </DialogFooter>
-          </form>
+              {foundProfile && (
+                <>
+                  <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                    <div className="font-medium">{foundProfile.full_name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {foundProfile.email}
+                      {foundProfile.phone ? ` · ${foundProfile.phone}` : ''}
+                    </div>
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      תפקיד נוכחי: {foundProfile.role === 'client' ? 'מטופל' : foundProfile.role}
+                    </div>
+                  </div>
+                  <DoctorFields form={promoteForm} setForm={setPromoteForm} />
+                </>
+              )}
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={saving}>
+                  ביטול
+                </Button>
+                <Button type="submit" disabled={!foundProfile || saving}>
+                  {saving && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
+                  קדם לרופא
+                </Button>
+              </DialogFooter>
+            </form>
+          )}
         </DialogContent>
       </Dialog>
     </>
@@ -353,8 +465,8 @@ function DoctorFields({
   form,
   setForm,
 }: {
-  form: EditState;
-  setForm: (s: EditState) => void;
+  form: DoctorFieldsState;
+  setForm: (s: DoctorFieldsState) => void;
 }) {
   return (
     <>
@@ -412,7 +524,7 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
       </div>
       <h3 className="text-lg font-semibold">אין רופאים עדיין</h3>
       <p className="max-w-sm text-sm text-muted-foreground">
-        בקש מהרופא להירשם בעמוד ה-Signup, ואז קדם אותו כאן עם המייל שלו.
+        צור חשבון חדש ישירות, או קדם משתמש קיים שכבר נרשם.
       </p>
       <Button onClick={onAdd} className="mt-2">
         <UserPlus className="h-4 w-4" />

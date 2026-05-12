@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('id', userId)
       .single();
     if (error) {
-      console.error('Failed to load profile:', error.message);
+      console.error('[auth] failed to load profile:', error.message);
       setProfile(null);
       return;
     }
@@ -50,19 +50,45 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getSession().then(async ({ data }) => {
+    // Initial load: validate the session against the server (getUser hits the
+    // network; getSession only reads localStorage). If the stored session is
+    // expired or invalid, sign out cleanly so the user lands on /login instead
+    // of being stuck on a loader forever.
+    (async () => {
+      const { data: sessionData } = await supabase.auth.getSession();
       if (!mounted) return;
-      setSession(data.session);
-      if (data.session) await loadProfile(data.session.user.id);
-      setLoading(false);
-    });
 
-    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, s) => {
+      if (!sessionData.session) {
+        setSession(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      const { data: userData, error } = await supabase.auth.getUser();
+      if (!mounted) return;
+
+      if (error || !userData?.user) {
+        console.warn('[auth] stored session invalid — signing out:', error?.message);
+        await supabase.auth.signOut();
+        setSession(null);
+        setProfile(null);
+        setLoading(false);
+        return;
+      }
+
+      setSession(sessionData.session);
+      await loadProfile(userData.user.id);
+      setLoading(false);
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
       if (!mounted) return;
       setSession(s);
-      if (s) {
+      if (s && event !== 'INITIAL_SESSION') {
+        // Don't re-fetch on initial — the bootstrap above handles it.
         await loadProfile(s.user.id);
-      } else {
+      } else if (!s) {
         setProfile(null);
       }
     });
