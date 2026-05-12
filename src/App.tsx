@@ -9,7 +9,7 @@ import AdminOverview from '@/pages/admin/AdminOverview';
 import AdminServices from '@/pages/admin/AdminServices';
 import AdminDoctors from '@/pages/admin/AdminDoctors';
 import AdminAppointments from '@/pages/admin/AdminAppointments';
-import AdminPlaceholder from '@/pages/admin/AdminPlaceholder';
+import AdminSettings from '@/pages/admin/AdminSettings';
 import DoctorLayout from '@/pages/doctor/DoctorLayout';
 import DoctorCalendar from '@/pages/doctor/DoctorCalendar';
 import DoctorHours from '@/pages/doctor/DoctorHours';
@@ -56,15 +56,7 @@ export default function App() {
             <Route path="services" element={<AdminServices />} />
             <Route path="doctors" element={<AdminDoctors />} />
             <Route path="appointments" element={<AdminAppointments />} />
-            <Route
-              path="settings"
-              element={
-                <AdminPlaceholder
-                  title="הגדרות"
-                  description="הגדרות מרפאה, סיסמה ופרופיל"
-                />
-              }
-            />
+            <Route path="settings" element={<AdminSettings />} />
           </Route>
 
           <Route
