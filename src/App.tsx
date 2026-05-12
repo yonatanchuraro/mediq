@@ -8,8 +8,12 @@ import AdminLayout from '@/pages/admin/AdminLayout';
 import AdminOverview from '@/pages/admin/AdminOverview';
 import AdminServices from '@/pages/admin/AdminServices';
 import AdminDoctors from '@/pages/admin/AdminDoctors';
+import AdminAppointments from '@/pages/admin/AdminAppointments';
 import AdminPlaceholder from '@/pages/admin/AdminPlaceholder';
-import DoctorDashboard from '@/pages/DoctorDashboard';
+import DoctorLayout from '@/pages/doctor/DoctorLayout';
+import DoctorCalendar from '@/pages/doctor/DoctorCalendar';
+import DoctorHours from '@/pages/doctor/DoctorHours';
+import DoctorProfile from '@/pages/doctor/DoctorProfile';
 import BookLayout from '@/pages/book/BookLayout';
 import MyAppointments from '@/pages/book/MyAppointments';
 import NewAppointment from '@/pages/book/NewAppointment';
@@ -51,15 +55,7 @@ export default function App() {
             <Route index element={<AdminOverview />} />
             <Route path="services" element={<AdminServices />} />
             <Route path="doctors" element={<AdminDoctors />} />
-            <Route
-              path="appointments"
-              element={
-                <AdminPlaceholder
-                  title="תורים"
-                  description="כל התורים במרפאה — תצוגה, סינון ועריכה"
-                />
-              }
-            />
+            <Route path="appointments" element={<AdminAppointments />} />
             <Route
               path="settings"
               element={
@@ -72,13 +68,17 @@ export default function App() {
           </Route>
 
           <Route
-            path="/doctor/*"
+            path="/doctor"
             element={
               <ProtectedRoute requireRole="doctor">
-                <DoctorDashboard />
+                <DoctorLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route index element={<DoctorCalendar />} />
+            <Route path="hours" element={<DoctorHours />} />
+            <Route path="profile" element={<DoctorProfile />} />
+          </Route>
           <Route
             path="/book"
             element={
