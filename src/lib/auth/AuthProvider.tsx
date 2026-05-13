@@ -15,6 +15,7 @@ interface AuthContextValue {
   session: Session | null;
   profile: Profile | null;
   loading: boolean;
+  profileError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (data: {
     email: string;
@@ -32,11 +33,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   // Loads the user's profile with 2 retries and exponential backoff. On
   // transient failure we deliberately do NOT clobber the existing profile
   // (returning to it would leave the user stuck on a Loader). The bootstrap
   // path passes `clearOnFail` so the first-load case can still drop to null.
+  //
+  // If the profile row is missing entirely (PGRST116) we attempt to back-fill
+  // it from the auth user's metadata — this rescues accounts where the
+  // handle_new_user trigger didn't run or whose row was deleted manually.
   const loadProfile = useCallback(
     async (userId: string, { clearOnFail = false }: { clearOnFail?: boolean } = {}) => {
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -47,13 +53,47 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           .single();
         if (!error) {
           setProfile(data as Profile);
+          setProfileError(null);
           return;
         }
+
+        // No row at all — try to create one from the auth metadata, once.
+        if (error.code === 'PGRST116') {
+          const { data: userData } = await supabase.auth.getUser();
+          const u = userData?.user;
+          if (u) {
+            const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+            const { data: inserted, error: insErr } = await supabase
+              .from('profiles')
+              .insert({
+                id: u.id,
+                email: u.email,
+                full_name: (meta.full_name as string) ?? u.email?.split('@')[0] ?? null,
+                phone: (meta.phone as string) ?? null,
+                role: 'client',
+              })
+              .select('*')
+              .single();
+            if (!insErr && inserted) {
+              setProfile(inserted as Profile);
+              setProfileError(null);
+              return;
+            }
+            console.error('[auth] profile back-fill failed:', insErr?.message);
+            setProfileError(
+              `שורת הפרופיל חסרה ולא הצלחנו ליצור אותה (${insErr?.message ?? 'unknown'}).`
+            );
+            if (clearOnFail) setProfile(null);
+            return;
+          }
+        }
+
         if (attempt < 2) {
           await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
           continue;
         }
         console.error('[auth] failed to load profile after retries:', error.message);
+        setProfileError(error.message);
         if (clearOnFail) setProfile(null);
       }
     },
@@ -100,6 +140,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(s);
       if (!s) {
         setProfile(null);
+        setProfileError(null);
         return;
       }
       // Skip reload on bootstrap (handled above) and on TOKEN_REFRESHED — the
@@ -151,6 +192,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // succeeding.
     setSession(null);
     setProfile(null);
+    setProfileError(null);
     try {
       await supabase.auth.signOut();
     } catch (e) {
@@ -178,6 +220,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         loading,
+        profileError,
         signIn,
         signUp,
         signOut,
