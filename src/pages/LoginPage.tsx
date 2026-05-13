@@ -27,12 +27,10 @@ export default function LoginPage() {
     try {
       await signIn(email, password);
       toast.success('ברוך שובך');
-      // Honor the "from" location captured by ProtectedRoute when the user
-      // was bounced to /login — otherwise we'd dump them at "/" regardless
-      // of which page they were originally trying to reach.
-      const from =
-        (location.state as { from?: { pathname?: string } } | null)?.from?.pathname || '/';
-      navigate(from, { replace: true });
+      // Always route through RootRedirect so the role-based landing page
+      // wins. Honoring location.state.from here turned out to glue users
+      // to whatever page they were last on regardless of role.
+      navigate('/', { replace: true });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'התחברות נכשלה');
     } finally {

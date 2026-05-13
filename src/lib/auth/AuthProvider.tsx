@@ -68,18 +68,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ]);
       const run = (async () => {
         try {
+          console.log('[auth] loadProfile start, userId:', userId);
           for (let attempt = 0; attempt < 3; attempt++) {
+            // maybeSingle() instead of single(): an RLS-filtered row count of
+            // 0 returns data=null + error=null rather than a 406 / PGRST116,
+            // letting us distinguish "row is missing" from "request failed".
             const { data, error } = await withTimeout(
-              supabase.from('profiles').select('*').eq('id', userId).single()
+              supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
             );
-            if (!error) {
+            console.log('[auth] loadProfile attempt', attempt, { data, error });
+            if (!error && data) {
               setProfile(data as Profile);
               setProfileError(null);
               return;
             }
+            // Treat "no row found" (either explicit PGRST116 from .single, or
+            // null data from .maybeSingle) as a missing-profile situation.
+            const isMissing =
+              !error && !data
+                ? true
+                : error?.code === 'PGRST116' || /coerce.*single/i.test(error?.message ?? '');
 
-            // No row at all — try to create one from the auth metadata, once.
-            if (error.code === 'PGRST116') {
+            if (isMissing) {
               const { data: userData } = await supabase.auth.getUser();
               const u = userData?.user;
               if (u) {
@@ -128,8 +138,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
               continue;
             }
-            console.error('[auth] failed to load profile after retries:', error.message);
-            setProfileError(error.message);
+            const finalMsg =
+              error?.message ?? 'פרופיל לא נמצא — ייתכן שה-RLS חוסם או שה-id לא תואם.';
+            console.error('[auth] failed to load profile after retries:', finalMsg);
+            setProfileError(finalMsg);
             if (clearOnFail) setProfile(null);
           }
         } catch (e) {
