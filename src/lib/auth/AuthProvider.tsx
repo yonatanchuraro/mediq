@@ -223,25 +223,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    // Best-effort: clear local state immediately so the UI reacts even if
-    // the network call fails. Then call signOut() but don't depend on it
-    // succeeding.
+    // Order matters here:
+    //   1. Clear React state so the UI reacts instantly and ProtectedRoute
+    //      redirects to /login.
+    //   2. Nuke localStorage synchronously, BEFORE the async signOut() —
+    //      otherwise the cleanup races a fast subsequent signInWithPassword
+    //      (e.g. user logging in as a different account) and wipes the
+    //      *new* user's tokens, leaving them in a "stuck" half-authed state.
+    //   3. Then fire the network signOut, which invalidates the refresh
+    //      token server-side. Errors are non-fatal — local state is already
+    //      cleared.
     setSession(null);
     setProfile(null);
     setProfileError(null);
-    try {
-      await supabase.auth.signOut();
-    } catch (e) {
-      console.error('[auth] signOut error (ignored — state already cleared):', e);
-    }
-    // Hard nuke any lingering localStorage that supabase-js may not have
-    // cleaned up (rare, but happens after token-refresh edge cases).
     try {
       for (const key of Object.keys(localStorage)) {
         if (key.startsWith('sb-')) localStorage.removeItem(key);
       }
     } catch {
       /* no-op */
+    }
+    try {
+      await supabase.auth.signOut();
+    } catch (e) {
+      console.error('[auth] signOut error (ignored — state already cleared):', e);
     }
   }, []);
 
