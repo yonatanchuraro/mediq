@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -34,6 +35,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
+  // Dedupe in-flight profile loads. supabase's onAuthStateChange fires
+  // SIGNED_IN during signInWithPassword, and our signIn() also calls
+  // loadProfile directly — without this guard both run in parallel and the
+  // PGRST116 back-fill can race itself into a duplicate-key error.
+  const inFlight = useRef<Promise<void> | null>(null);
+  const inFlightUserId = useRef<string | null>(null);
 
   // Loads the user's profile with 2 retries and exponential backoff. On
   // transient failure we deliberately do NOT clobber the existing profile
@@ -45,56 +52,85 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // handle_new_user trigger didn't run or whose row was deleted manually.
   const loadProfile = useCallback(
     async (userId: string, { clearOnFail = false }: { clearOnFail?: boolean } = {}) => {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', userId)
-          .single();
-        if (!error) {
-          setProfile(data as Profile);
-          setProfileError(null);
-          return;
-        }
-
-        // No row at all — try to create one from the auth metadata, once.
-        if (error.code === 'PGRST116') {
-          const { data: userData } = await supabase.auth.getUser();
-          const u = userData?.user;
-          if (u) {
-            const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
-            const { data: inserted, error: insErr } = await supabase
-              .from('profiles')
-              .insert({
-                id: u.id,
-                email: u.email,
-                full_name: (meta.full_name as string) ?? u.email?.split('@')[0] ?? null,
-                phone: (meta.phone as string) ?? null,
-                role: 'client',
-              })
-              .select('*')
-              .single();
-            if (!insErr && inserted) {
-              setProfile(inserted as Profile);
-              setProfileError(null);
-              return;
-            }
-            console.error('[auth] profile back-fill failed:', insErr?.message);
-            setProfileError(
-              `שורת הפרופיל חסרה ולא הצלחנו ליצור אותה (${insErr?.message ?? 'unknown'}).`
-            );
-            if (clearOnFail) setProfile(null);
+      // If a load for the same user is already running, just await it.
+      if (inFlight.current && inFlightUserId.current === userId) {
+        return inFlight.current;
+      }
+      const run = (async () => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', userId)
+            .single();
+          if (!error) {
+            setProfile(data as Profile);
+            setProfileError(null);
             return;
           }
-        }
 
-        if (attempt < 2) {
-          await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
-          continue;
+          // No row at all — try to create one from the auth metadata, once.
+          if (error.code === 'PGRST116') {
+            const { data: userData } = await supabase.auth.getUser();
+            const u = userData?.user;
+            if (u) {
+              const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+              const { data: inserted, error: insErr } = await supabase
+                .from('profiles')
+                .insert({
+                  id: u.id,
+                  email: u.email,
+                  full_name:
+                    (meta.full_name as string) ?? u.email?.split('@')[0] ?? null,
+                  phone: (meta.phone as string) ?? null,
+                  role: 'client',
+                })
+                .select('*')
+                .single();
+              if (!insErr && inserted) {
+                setProfile(inserted as Profile);
+                setProfileError(null);
+                return;
+              }
+              // Duplicate-key just means a parallel call beat us to it —
+              // re-read and treat as success.
+              if (insErr?.code === '23505') {
+                const { data: again } = await supabase
+                  .from('profiles')
+                  .select('*')
+                  .eq('id', userId)
+                  .single();
+                if (again) {
+                  setProfile(again as Profile);
+                  setProfileError(null);
+                  return;
+                }
+              }
+              console.error('[auth] profile back-fill failed:', insErr?.message);
+              setProfileError(
+                `שורת הפרופיל חסרה ולא הצלחנו ליצור אותה (${insErr?.message ?? 'unknown'}).`
+              );
+              if (clearOnFail) setProfile(null);
+              return;
+            }
+          }
+
+          if (attempt < 2) {
+            await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+            continue;
+          }
+          console.error('[auth] failed to load profile after retries:', error.message);
+          setProfileError(error.message);
+          if (clearOnFail) setProfile(null);
         }
-        console.error('[auth] failed to load profile after retries:', error.message);
-        setProfileError(error.message);
-        if (clearOnFail) setProfile(null);
+      })();
+      inFlight.current = run;
+      inFlightUserId.current = userId;
+      try {
+        await run;
+      } finally {
+        inFlight.current = null;
+        inFlightUserId.current = null;
       }
     },
     []
