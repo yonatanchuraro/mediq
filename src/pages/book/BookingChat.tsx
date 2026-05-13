@@ -50,7 +50,24 @@ export default function BookingChat() {
       const { data, error } = await supabase.functions.invoke('gemini-chat', {
         body: { history, message },
       });
-      if (error) throw error;
+      // supabase-js wraps non-2xx into a generic FunctionsHttpError and
+      // stashes the real Response in error.context — read its body so the
+      // user sees the actual server message instead of "non-2xx status code".
+      if (error) {
+        let detail: string | undefined;
+        const ctx = (error as { context?: Response }).context;
+        if (ctx && typeof ctx.text === 'function') {
+          try {
+            const body = await ctx.text();
+            try {
+              detail = JSON.parse(body)?.error ?? body;
+            } catch {
+              detail = body;
+            }
+          } catch { /* ignore body read errors */ }
+        }
+        throw new Error(detail || error.message);
+      }
       if (data?.error) throw new Error(data.error);
       if (data?.history) {
         setHistory(data.history as Msg[]);

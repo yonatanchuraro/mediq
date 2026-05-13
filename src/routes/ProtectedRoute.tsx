@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '@/lib/auth/AuthProvider';
 import type { UserRole } from '@/types/database.types';
-import { Loader2 } from 'lucide-react';
+import { StuckGuard } from './StuckGuard';
 
 interface Props {
   children: ReactNode;
@@ -13,14 +13,7 @@ export function ProtectedRoute({ children, requireRole }: Props) {
   const { loading, session, profile } = useAuth();
   const location = useLocation();
 
-  const Loader = (
-    <div className="flex h-screen items-center justify-center gap-2 text-muted-foreground">
-      <Loader2 className="h-4 w-4 animate-spin" />
-      טוען…
-    </div>
-  );
-
-  if (loading) return Loader;
+  if (loading) return <StuckGuard />;
 
   if (!session) {
     return <Navigate to="/login" state={{ from: location }} replace />;
@@ -28,9 +21,10 @@ export function ProtectedRoute({ children, requireRole }: Props) {
 
   // If a role is required but the profile hasn't loaded yet, wait — otherwise
   // we'd let a user through to a page they may not be allowed to see. The
-  // load is normally instant (RLS allows reading own profile).
+  // load is normally instant (RLS allows reading own profile), but if it
+  // hangs we surface a recovery UI rather than spinning forever.
   if (requireRole) {
-    if (!profile) return Loader;
+    if (!profile) return <StuckGuard />;
     const allowed = Array.isArray(requireRole) ? requireRole : [requireRole];
     if (!allowed.includes(profile.role)) {
       return <Navigate to="/" replace />;

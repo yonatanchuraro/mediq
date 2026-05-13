@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth/AuthProvider';
 import { ProtectedRoute } from '@/routes/ProtectedRoute';
+import { StuckGuard } from '@/routes/StuckGuard';
 import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
 
@@ -35,9 +36,9 @@ function CenterLoader() {
 
 function RootRedirect() {
   const { loading, session, profile } = useAuth();
-  if (loading) return <CenterLoader />;
+  if (loading) return <StuckGuard />;
   if (!session) return <Navigate to="/login" replace />;
-  if (!profile) return <CenterLoader />;
+  if (!profile) return <StuckGuard />;
   if (profile.role === 'admin') return <Navigate to="/admin" replace />;
   if (profile.role === 'doctor') return <Navigate to="/doctor" replace />;
   return <Navigate to="/book" replace />;

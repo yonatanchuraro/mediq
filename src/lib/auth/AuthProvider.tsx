@@ -33,19 +33,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const loadProfile = useCallback(async (userId: string) => {
-    const { data, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', userId)
-      .single();
-    if (error) {
-      console.error('[auth] failed to load profile:', error.message);
-      setProfile(null);
-      return;
-    }
-    setProfile(data as Profile);
-  }, []);
+  // Loads the user's profile with 2 retries and exponential backoff. On
+  // transient failure we deliberately do NOT clobber the existing profile
+  // (returning to it would leave the user stuck on a Loader). The bootstrap
+  // path passes `clearOnFail` so the first-load case can still drop to null.
+  const loadProfile = useCallback(
+    async (userId: string, { clearOnFail = false }: { clearOnFail?: boolean } = {}) => {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .single();
+        if (!error) {
+          setProfile(data as Profile);
+          return;
+        }
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+          continue;
+        }
+        console.error('[auth] failed to load profile after retries:', error.message);
+        if (clearOnFail) setProfile(null);
+      }
+    },
+    []
+  );
 
   useEffect(() => {
     let mounted = true;
@@ -78,18 +91,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       setSession(sessionData.session);
-      await loadProfile(userData.user.id);
+      await loadProfile(userData.user.id, { clearOnFail: true });
       setLoading(false);
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
       if (!mounted) return;
       setSession(s);
-      if (s && event !== 'INITIAL_SESSION') {
-        // Don't re-fetch on initial — the bootstrap above handles it.
-        await loadProfile(s.user.id);
-      } else if (!s) {
+      if (!s) {
         setProfile(null);
+        return;
+      }
+      // Skip reload on bootstrap (handled above) and on TOKEN_REFRESHED — the
+      // profile row doesn't change when only the JWT is renewed, and a bad
+      // network blip during refresh used to leave us stuck on null. Only
+      // re-fetch when the *user* actually changed.
+      if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        await loadProfile(s.user.id);
       }
     });
 
@@ -99,10 +117,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [loadProfile]);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-  }, []);
+  const signIn = useCallback(
+    async (email: string, password: string) => {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      // Eagerly seed session + profile so the caller can navigate immediately
+      // without racing onAuthStateChange. Without this, RootRedirect renders
+      // with the *previous* user's state (or null) and may flash a loader or
+      // mis-route until the listener catches up.
+      if (data.session) {
+        setSession(data.session);
+        await loadProfile(data.session.user.id);
+      }
+    },
+    [loadProfile]
+  );
 
   const signUp: AuthContextValue['signUp'] = useCallback(
     async ({ email, password, full_name, phone }) => {
