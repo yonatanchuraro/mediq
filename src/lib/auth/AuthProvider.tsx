@@ -56,14 +56,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (inFlight.current && inFlightUserId.current === userId) {
         return inFlight.current;
       }
+      // Race the supabase fetch against a hard timeout. A hung promise (network
+      // blip, dropped connection) used to wedge the dedup forever; now it
+      // surfaces as a normal error after `ms` so the user sees a real message.
+      const withTimeout = <T,>(p: PromiseLike<T>, ms = 8000): Promise<T> =>
+        Promise.race([
+          Promise.resolve(p),
+          new Promise<T>((_, reject) =>
+            setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+          ),
+        ]);
       const run = (async () => {
         try {
           for (let attempt = 0; attempt < 3; attempt++) {
-            const { data, error } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', userId)
-              .single();
+            const { data, error } = await withTimeout(
+              supabase.from('profiles').select('*').eq('id', userId).single()
+            );
             if (!error) {
               setProfile(data as Profile);
               setProfileError(null);
