@@ -57,70 +57,81 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return inFlight.current;
       }
       const run = (async () => {
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', userId)
-            .single();
-          if (!error) {
-            setProfile(data as Profile);
-            setProfileError(null);
-            return;
-          }
+        try {
+          for (let attempt = 0; attempt < 3; attempt++) {
+            const { data, error } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', userId)
+              .single();
+            if (!error) {
+              setProfile(data as Profile);
+              setProfileError(null);
+              return;
+            }
 
-          // No row at all — try to create one from the auth metadata, once.
-          if (error.code === 'PGRST116') {
-            const { data: userData } = await supabase.auth.getUser();
-            const u = userData?.user;
-            if (u) {
-              const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
-              const { data: inserted, error: insErr } = await supabase
-                .from('profiles')
-                .insert({
-                  id: u.id,
-                  email: u.email,
-                  full_name:
-                    (meta.full_name as string) ?? u.email?.split('@')[0] ?? null,
-                  phone: (meta.phone as string) ?? null,
-                  role: 'client',
-                })
-                .select('*')
-                .single();
-              if (!insErr && inserted) {
-                setProfile(inserted as Profile);
-                setProfileError(null);
-                return;
-              }
-              // Duplicate-key just means a parallel call beat us to it —
-              // re-read and treat as success.
-              if (insErr?.code === '23505') {
-                const { data: again } = await supabase
+            // No row at all — try to create one from the auth metadata, once.
+            if (error.code === 'PGRST116') {
+              const { data: userData } = await supabase.auth.getUser();
+              const u = userData?.user;
+              if (u) {
+                const meta = (u.user_metadata ?? {}) as Record<string, unknown>;
+                const { data: inserted, error: insErr } = await supabase
                   .from('profiles')
+                  .insert({
+                    id: u.id,
+                    email: u.email,
+                    full_name:
+                      (meta.full_name as string) ?? u.email?.split('@')[0] ?? null,
+                    phone: (meta.phone as string) ?? null,
+                    role: 'client',
+                  })
                   .select('*')
-                  .eq('id', userId)
                   .single();
-                if (again) {
-                  setProfile(again as Profile);
+                if (!insErr && inserted) {
+                  setProfile(inserted as Profile);
                   setProfileError(null);
                   return;
                 }
+                // Duplicate-key just means a parallel call beat us to it —
+                // re-read and treat as success.
+                if (insErr?.code === '23505') {
+                  const { data: again } = await supabase
+                    .from('profiles')
+                    .select('*')
+                    .eq('id', userId)
+                    .single();
+                  if (again) {
+                    setProfile(again as Profile);
+                    setProfileError(null);
+                    return;
+                  }
+                }
+                console.error('[auth] profile back-fill failed:', insErr?.message);
+                setProfileError(
+                  `שורת הפרופיל חסרה ולא הצלחנו ליצור אותה (${insErr?.message ?? 'unknown'}).`
+                );
+                if (clearOnFail) setProfile(null);
+                return;
               }
-              console.error('[auth] profile back-fill failed:', insErr?.message);
-              setProfileError(
-                `שורת הפרופיל חסרה ולא הצלחנו ליצור אותה (${insErr?.message ?? 'unknown'}).`
-              );
-              if (clearOnFail) setProfile(null);
-              return;
             }
-          }
 
-          if (attempt < 2) {
-            await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
-            continue;
+            if (attempt < 2) {
+              await new Promise((r) => setTimeout(r, 250 * (attempt + 1)));
+              continue;
+            }
+            console.error('[auth] failed to load profile after retries:', error.message);
+            setProfileError(error.message);
+            if (clearOnFail) setProfile(null);
           }
-          console.error('[auth] failed to load profile after retries:', error.message);
-          setProfileError(error.message);
+        } catch (e) {
+          // Network failure or any unexpected throw — make sure we record an
+          // error and don't leave the caller stuck on a null profile with no
+          // diagnostic info. Previously this propagated to the bootstrap and
+          // skipped setLoading(false), producing a permanent silent stuck state.
+          const msg = e instanceof Error ? e.message : 'שגיאה לא צפויה בטעינת הפרופיל';
+          console.error('[auth] loadProfile threw:', e);
+          setProfileError(msg);
           if (clearOnFail) setProfile(null);
         }
       })();
@@ -143,32 +154,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // network; getSession only reads localStorage). If the stored session is
     // expired or invalid, sign out cleanly so the user lands on /login instead
     // of being stuck on a loader forever.
+    //
+    // The outer try/finally guarantees setLoading(false) runs even when
+    // something inside throws — previously an unexpected throw left
+    // `loading=true` and the UI on a permanent loader.
     (async () => {
-      const { data: sessionData } = await supabase.auth.getSession();
-      if (!mounted) return;
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!mounted) return;
 
-      if (!sessionData.session) {
-        setSession(null);
-        setProfile(null);
-        setLoading(false);
-        return;
+        if (!sessionData.session) {
+          setSession(null);
+          setProfile(null);
+          return;
+        }
+
+        const { data: userData, error } = await supabase.auth.getUser();
+        if (!mounted) return;
+
+        if (error || !userData?.user) {
+          console.warn('[auth] stored session invalid — signing out:', error?.message);
+          await supabase.auth.signOut();
+          setSession(null);
+          setProfile(null);
+          return;
+        }
+
+        setSession(sessionData.session);
+        await loadProfile(userData.user.id, { clearOnFail: true });
+      } catch (e) {
+        console.error('[auth] bootstrap threw:', e);
+        setProfileError(e instanceof Error ? e.message : 'אתחול נכשל');
+      } finally {
+        if (mounted) setLoading(false);
       }
-
-      const { data: userData, error } = await supabase.auth.getUser();
-      if (!mounted) return;
-
-      if (error || !userData?.user) {
-        console.warn('[auth] stored session invalid — signing out:', error?.message);
-        await supabase.auth.signOut();
-        setSession(null);
-        setProfile(null);
-        setLoading(false);
-        return;
-      }
-
-      setSession(sessionData.session);
-      await loadProfile(userData.user.id, { clearOnFail: true });
-      setLoading(false);
     })();
 
     const { data: sub } = supabase.auth.onAuthStateChange(async (event, s) => {
