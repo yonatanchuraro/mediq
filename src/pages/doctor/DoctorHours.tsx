@@ -87,17 +87,9 @@ export default function DoctorHours() {
     }
     setSaving(true);
     try {
-      // upsert each row keyed by (doctor_id, weekday). The unique constraint
-      // on (doctor_id, weekday) makes this safe — we wipe + reinsert per row.
-      const { error: delErr } = await supabase
-        .from('working_hours')
-        .delete()
-        .eq('doctor_id', user.id);
-      if (delErr) {
-        console.error('[DoctorHours] delete error', delErr);
-        toast.error(delErr.message);
-        return;
-      }
+      // Upsert keyed by (doctor_id, weekday). Previously this was a
+      // delete-then-insert which could wipe ALL working hours if the
+      // re-insert failed — leaving the doctor un-bookable.
       const payload = rows.map((r) => ({
         doctor_id: user.id,
         weekday: r.weekday,
@@ -105,9 +97,11 @@ export default function DoctorHours() {
         end_time: r.is_open ? r.end_time : null,
         is_open: r.is_open,
       }));
-      const { error } = await supabase.from('working_hours').insert(payload);
+      const { error } = await supabase
+        .from('working_hours')
+        .upsert(payload, { onConflict: 'doctor_id,weekday' });
       if (error) {
-        console.error('[DoctorHours] insert error', error);
+        console.error('[DoctorHours] upsert error', error);
         toast.error(error.message);
         return;
       }

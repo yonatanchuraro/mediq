@@ -33,12 +33,17 @@ export default function SignupPage() {
     }
     setLoading(true);
     try {
-      await signUp({
+      const { needsConfirmation } = await signUp({
         email: form.email,
         password: form.password,
         full_name: form.full_name,
         phone: form.phone || undefined,
       });
+      if (needsConfirmation) {
+        toast.success('נשלח אליך אימייל לאישור — אשר אותו לפני הכניסה.');
+        navigate('/login', { replace: true });
+        return;
+      }
       toast.success('החשבון נוצר, ברוך הבא!');
       navigate('/', { replace: true });
     } catch (err) {

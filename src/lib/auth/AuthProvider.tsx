@@ -23,7 +23,7 @@ interface AuthContextValue {
     password: string;
     full_name: string;
     phone?: string;
-  }) => Promise<void>;
+  }) => Promise<{ session: Session | null; needsConfirmation: boolean }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
 }
@@ -212,14 +212,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp: AuthContextValue['signUp'] = useCallback(
     async ({ email, password, full_name, phone }) => {
-      const { error } = await supabase.auth.signUp({
+      const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: { data: { full_name, phone } },
       });
       if (error) throw error;
+      // Supabase quirk: when the email already exists it does NOT return an
+      // error — it returns a fake user object with an empty identities array
+      // to avoid leaking which addresses are registered. Detect and surface
+      // a real error so the signup form doesn't pretend it succeeded.
+      if (data.user && (data.user.identities?.length ?? 0) === 0) {
+        throw new Error('האימייל הזה כבר רשום. נסה להתחבר במקום.');
+      }
+      // If session is null after signUp the project has "Confirm email"
+      // enabled — the caller should show a "check your inbox" message
+      // instead of navigating into the app.
+      if (data.session) {
+        setSession(data.session);
+        await loadProfile(data.session.user.id);
+      }
+      return { session: data.session, needsConfirmation: !data.session };
     },
-    []
+    [loadProfile]
   );
 
   const signOut = useCallback(async () => {
