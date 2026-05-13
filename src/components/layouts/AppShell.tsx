@@ -50,12 +50,26 @@ export function AppShell({
 
   return (
     <div
-      className="grid h-screen overflow-hidden bg-background transition-[grid-template-columns] duration-300"
+      className="relative grid h-screen overflow-hidden bg-background transition-[grid-template-columns] duration-300"
       style={{ gridTemplateColumns: `${collapsed ? '72px' : '240px'} 1fr` }}
     >
+      {/* Collapse toggle — sits on top of the sidebar/content boundary.
+          Rendered outside the <aside> because the sidebar uses overflow-hidden
+          to clip its contents during the width transition. */}
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        aria-label={collapsed ? 'הרחב סיידבר' : 'כווץ סיידבר'}
+        title={collapsed ? 'הרחב' : 'כווץ'}
+        className="absolute top-7 z-20 flex h-7 w-7 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-md transition-[right] duration-300 hover:bg-accent hover:text-foreground"
+        style={{ right: `${(collapsed ? 72 : 240) - 14}px` }}
+      >
+        {collapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+      </button>
+
       <aside
         className={cn(
-          'relative flex h-screen flex-col overflow-hidden border-l bg-card p-3 transition-all duration-300',
+          'flex h-screen flex-col overflow-hidden border-l bg-card p-3 transition-all duration-300',
           collapsed ? 'items-center' : 'items-stretch p-4'
         )}
       >
@@ -78,17 +92,6 @@ export function AppShell({
             </div>
           )}
         </div>
-
-        {/* Collapse toggle */}
-        <button
-          type="button"
-          onClick={() => setCollapsed((c) => !c)}
-          aria-label={collapsed ? 'הרחב סיידבר' : 'כווץ סיידבר'}
-          title={collapsed ? 'הרחב' : 'כווץ'}
-          className="absolute -left-3 top-7 z-10 flex h-6 w-6 items-center justify-center rounded-full border bg-card text-muted-foreground shadow-sm transition hover:bg-accent hover:text-foreground"
-        >
-          {collapsed ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        </button>
 
         {/* Nav — uses min-h-0 so it can shrink instead of forcing the
             sidebar to overflow; scrollbar is suppressed visually since six
