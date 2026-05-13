@@ -68,7 +68,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         ]);
       const run = (async () => {
         try {
-          console.log('[auth] loadProfile start, userId:', userId);
           for (let attempt = 0; attempt < 3; attempt++) {
             // maybeSingle() instead of single(): an RLS-filtered row count of
             // 0 returns data=null + error=null rather than a 406 / PGRST116,
@@ -76,7 +75,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const { data, error } = await withTimeout(
               supabase.from('profiles').select('*').eq('id', userId).maybeSingle()
             );
-            console.log('[auth] loadProfile attempt', attempt, { data, error });
             if (!error && data) {
               setProfile(data as Profile);
               setProfileError(null);
@@ -235,12 +233,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signIn = useCallback(
     async (email: string, password: string) => {
+      // Hard-reset every trace of any previous session before authenticating.
+      // Stale sb-* tokens / lingering supabase-js internal state were the
+      // root of the user-switching bugs — the new sign-in occasionally ran
+      // queries with the wrong JWT until the listener caught up. Clearing
+      // synchronously up-front makes the flow deterministic.
+      try {
+        await supabase.auth.signOut({ scope: 'local' });
+      } catch {
+        /* ignore — we're going to overwrite anyway */
+      }
+      try {
+        for (const key of Object.keys(localStorage)) {
+          if (key.startsWith('sb-')) localStorage.removeItem(key);
+        }
+      } catch {
+        /* no-op */
+      }
+      setSession(null);
+      setProfile(null);
+      setProfileError(null);
+
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       // Eagerly seed session + profile so the caller can navigate immediately
-      // without racing onAuthStateChange. Without this, RootRedirect renders
-      // with the *previous* user's state (or null) and may flash a loader or
-      // mis-route until the listener catches up.
+      // without racing onAuthStateChange.
       if (data.session) {
         setSession(data.session);
         await loadProfile(data.session.user.id);
