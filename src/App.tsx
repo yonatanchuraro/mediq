@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { ComponentType, lazy, Suspense } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { AuthProvider, useAuth } from '@/lib/auth/AuthProvider';
@@ -7,23 +7,49 @@ import { StuckGuard } from '@/routes/StuckGuard';
 import LoginPage from '@/pages/LoginPage';
 import SignupPage from '@/pages/SignupPage';
 
+// Wraps lazy() so that a chunk-load failure (typically: the user has an old
+// index.html cached after we shipped a new deploy, and the old chunk hashes
+// no longer exist on the CDN — Vercel returns 404 → blank screen) triggers
+// a one-shot hard reload to fetch the fresh index.html + new chunks.
+// sessionStorage flag prevents infinite reload loops if the real issue is
+// something else (e.g. the chunk genuinely doesn't exist on the server).
+function lazyWithReload<T extends ComponentType<unknown>>(
+  factory: () => Promise<{ default: T }>
+) {
+  return lazy(async () => {
+    try {
+      return await factory();
+    } catch (e) {
+      const KEY = 'mediq.chunk-reload';
+      if (typeof window !== 'undefined' && !sessionStorage.getItem(KEY)) {
+        sessionStorage.setItem(KEY, '1');
+        window.location.reload();
+        // Return a never-resolving promise so React doesn't render anything
+        // while the page is reloading.
+        return new Promise<{ default: T }>(() => {});
+      }
+      throw e;
+    }
+  });
+}
+
 // Lazy-load everything behind auth so the login bundle stays small and the
 // rest of the app streams in on demand.
-const AdminLayout = lazy(() => import('@/pages/admin/AdminLayout'));
-const AdminOverview = lazy(() => import('@/pages/admin/AdminOverview'));
-const AdminServices = lazy(() => import('@/pages/admin/AdminServices'));
-const AdminSpecialties = lazy(() => import('@/pages/admin/AdminSpecialties'));
-const AdminDoctors = lazy(() => import('@/pages/admin/AdminDoctors'));
-const AdminAppointments = lazy(() => import('@/pages/admin/AdminAppointments'));
-const AdminSettings = lazy(() => import('@/pages/admin/AdminSettings'));
-const DoctorLayout = lazy(() => import('@/pages/doctor/DoctorLayout'));
-const DoctorCalendar = lazy(() => import('@/pages/doctor/DoctorCalendar'));
-const DoctorHours = lazy(() => import('@/pages/doctor/DoctorHours'));
-const DoctorProfile = lazy(() => import('@/pages/doctor/DoctorProfile'));
-const BookLayout = lazy(() => import('@/pages/book/BookLayout'));
-const MyAppointments = lazy(() => import('@/pages/book/MyAppointments'));
-const NewAppointment = lazy(() => import('@/pages/book/NewAppointment'));
-const BookingChat = lazy(() => import('@/pages/book/BookingChat'));
+const AdminLayout = lazyWithReload(() => import('@/pages/admin/AdminLayout'));
+const AdminOverview = lazyWithReload(() => import('@/pages/admin/AdminOverview'));
+const AdminServices = lazyWithReload(() => import('@/pages/admin/AdminServices'));
+const AdminSpecialties = lazyWithReload(() => import('@/pages/admin/AdminSpecialties'));
+const AdminDoctors = lazyWithReload(() => import('@/pages/admin/AdminDoctors'));
+const AdminAppointments = lazyWithReload(() => import('@/pages/admin/AdminAppointments'));
+const AdminSettings = lazyWithReload(() => import('@/pages/admin/AdminSettings'));
+const DoctorLayout = lazyWithReload(() => import('@/pages/doctor/DoctorLayout'));
+const DoctorCalendar = lazyWithReload(() => import('@/pages/doctor/DoctorCalendar'));
+const DoctorHours = lazyWithReload(() => import('@/pages/doctor/DoctorHours'));
+const DoctorProfile = lazyWithReload(() => import('@/pages/doctor/DoctorProfile'));
+const BookLayout = lazyWithReload(() => import('@/pages/book/BookLayout'));
+const MyAppointments = lazyWithReload(() => import('@/pages/book/MyAppointments'));
+const NewAppointment = lazyWithReload(() => import('@/pages/book/NewAppointment'));
+const BookingChat = lazyWithReload(() => import('@/pages/book/BookingChat'));
 
 function CenterLoader() {
   return (
