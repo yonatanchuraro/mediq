@@ -1,59 +1,87 @@
 import { useEffect, useState } from 'react';
 import { Loader2, RotateCcw, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { BrandMark } from '@/components/BrandMark';
 import { useAuth } from '@/lib/auth/AuthProvider';
 
-// Renders a loader, but if we're still here after `timeoutMs` ms (or if
-// AuthProvider has already reported a profile-load error), shows a recovery
-// UI instead — letting the user escape the stuck state without having to
-// manually clear cookies / hard-reload.
-export function StuckGuard({ timeoutMs = 5000 }: { timeoutMs?: number }) {
-  const [timedOut, setTimedOut] = useState(false);
+// Shows a rich loading card while auth/profile loads, then a cold-start hint
+// after a short delay, then a recovery UI (reload/logout) once we know the
+// load actually failed or has dragged on too long. The progressive disclosure
+// keeps the screen visually present instead of looking like a frozen blank
+// page — which is what users perceived when the loader was just a 16px
+// spinner on a near-white background.
+export function StuckGuard({
+  hintAfterMs = 4000,
+  giveUpAfterMs = 35000,
+}: {
+  hintAfterMs?: number;
+  giveUpAfterMs?: number;
+}) {
+  const [showHint, setShowHint] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
   const { signOut, profileError } = useAuth();
 
   useEffect(() => {
-    const t = window.setTimeout(() => setTimedOut(true), timeoutMs);
-    return () => window.clearTimeout(t);
-  }, [timeoutMs]);
+    const t1 = window.setTimeout(() => setShowHint(true), hintAfterMs);
+    const t2 = window.setTimeout(() => setGaveUp(true), giveUpAfterMs);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [hintAfterMs, giveUpAfterMs]);
 
-  // Surface the error immediately if we already know the load failed,
-  // instead of pretending to load for 5 more seconds.
-  const stuck = timedOut || !!profileError;
-
-  if (!stuck) {
-    return (
-      <div className="flex h-screen items-center justify-center gap-2 text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" />
-        טוען…
-      </div>
-    );
-  }
+  // Surface recovery UI either when we already know it failed, or after the
+  // give-up window has elapsed.
+  const failed = gaveUp || !!profileError;
 
   return (
-    <div className="flex h-screen flex-col items-center justify-center gap-4 px-6 text-center">
-      <div className="max-w-md space-y-2">
-        <h2 className="text-xl font-bold">לא הצלחנו לטעון את הפרופיל</h2>
-        <p className="text-sm text-muted-foreground">
-          ייתכן שיש בעיית רשת זמנית. אפשר לנסות לטעון מחדש, או להתנתק ולהיכנס שוב.
-        </p>
-        {profileError && (
-          <p
-            dir="ltr"
-            className="rounded-md bg-destructive/10 px-3 py-2 text-left font-mono text-xs text-destructive"
-          >
-            {profileError}
-          </p>
+    <div className="flex h-screen items-center justify-center px-6">
+      <div className="w-full max-w-md rounded-2xl border bg-card p-8 text-center shadow-sm">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-teal-400 text-white shadow-md shadow-primary/30">
+          <BrandMark className="h-7 w-7" />
+        </div>
+        <h2 className="text-lg font-bold">MediQ</h2>
+
+        {!failed ? (
+          <>
+            <div className="mt-6 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              טוען את החשבון…
+            </div>
+            {showHint && (
+              <p className="mt-3 text-xs text-muted-foreground/80">
+                כניסה ראשונה לאחר חוסר פעילות עלולה לקחת עד דקה.
+              </p>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="mt-4 text-sm font-medium text-foreground">
+              לא הצלחנו לטעון את הפרופיל
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              ייתכן שיש בעיית רשת זמנית. נסה לטעון מחדש או להתנתק ולהיכנס שוב.
+            </p>
+            {profileError && (
+              <p
+                dir="ltr"
+                className="mt-3 rounded-md bg-destructive/10 px-3 py-2 text-left font-mono text-[11px] text-destructive"
+              >
+                {profileError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-center gap-2">
+              <Button onClick={() => window.location.reload()} variant="default">
+                <RotateCcw className="h-4 w-4" />
+                טען מחדש
+              </Button>
+              <Button onClick={() => signOut()} variant="outline">
+                <LogOut className="h-4 w-4" />
+                התנתק
+              </Button>
+            </div>
+          </>
         )}
-      </div>
-      <div className="flex gap-2">
-        <Button onClick={() => window.location.reload()} variant="default">
-          <RotateCcw className="h-4 w-4" />
-          טען מחדש
-        </Button>
-        <Button onClick={() => signOut()} variant="outline">
-          <LogOut className="h-4 w-4" />
-          התנתק
-        </Button>
       </div>
     </div>
   );

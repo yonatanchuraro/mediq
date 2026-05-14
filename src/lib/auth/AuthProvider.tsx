@@ -59,9 +59,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Race the supabase fetch against a hard timeout. A hung promise (network
       // blip, dropped connection, Supabase free-tier cold start) used to wedge
       // the dedup forever; now it surfaces as a normal error after `ms` so the
-      // user sees a real message. 15s is generous enough that a sleepy free-
-      // tier project waking up has time to respond.
-      const withTimeout = <T,>(p: PromiseLike<T>, ms = 15000): Promise<T> =>
+      // user sees a real message. 30s covers a NANO/free-tier compute waking
+      // from idle — the supabase.ts module-load pre-warm should already have
+      // most of that latency in flight by the time we get here.
+      const withTimeout = <T,>(p: PromiseLike<T>, ms = 30000): Promise<T> =>
         Promise.race([
           Promise.resolve(p),
           new Promise<T>((_, reject) =>

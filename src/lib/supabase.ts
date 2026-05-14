@@ -19,3 +19,18 @@ export const supabase = createClient(url, anon, {
     detectSessionInUrl: true,
   },
 });
+
+// Cold-start pre-warm. On NANO / free-tier Supabase, the Postgres compute is
+// shared and sleeps between visits — the first query after idle can take
+// 30-60s. Firing a throwaway query on module load means the wake-up happens
+// in parallel with React mounting + auth bootstrap, so by the time
+// loadProfile runs the compute is already warm. Fire-and-forget — RLS will
+// return empty for the anon key which is fine; we only care about the wake.
+void supabase
+  .from('profiles')
+  .select('id')
+  .limit(1)
+  .then(
+    () => {},
+    () => {}
+  );
