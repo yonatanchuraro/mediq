@@ -12,11 +12,16 @@ import { useAuth } from '@/lib/auth/AuthProvider';
 // spinner on a near-white background.
 export function StuckGuard({
   hintAfterMs = 4000,
-  giveUpAfterMs = 35000,
+  giveUpAfterMs = 95000,
 }: {
   hintAfterMs?: number;
   giveUpAfterMs?: number;
 }) {
+  // 95s give-up is intentional: loadProfile auto-retries up to 3× 30s for
+  // cold-start tolerance (~90s max), so we mustn't show recovery UI before
+  // those auto-retries finish — otherwise the user clicks Reload mid-retry
+  // and we're back to square one. Recovery still appears instantly on
+  // profileError, which fires only after the auto-retry chain exhausts.
   const [showHint, setShowHint] = useState(false);
   const [gaveUp, setGaveUp] = useState(false);
   const { signOut, profileError } = useAuth();

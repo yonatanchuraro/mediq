@@ -70,6 +70,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           ),
         ]);
       const run = (async () => {
+        // Cold-start auto-retry: each iteration of the OUTER loop is a fresh
+        // try-block. If the inner query throws a timeout (NANO compute still
+        // waking from idle), we eat the throw and loop again — the failed
+        // first attempt is what kicks Postgres awake, so the next attempt
+        // usually catches it warm. 3 outer attempts × 30s timeout = 90s max
+        // before we surface profileError, which is enough for worst-case
+        // NANO wake. Non-timeout errors fall through to the existing handling.
+        for (let coldRetry = 0; coldRetry < 3; coldRetry++) {
         try {
           for (let attempt = 0; attempt < 3; attempt++) {
             // maybeSingle() instead of single(): an RLS-filtered row count of
@@ -146,14 +154,27 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (clearOnFail) setProfile(null);
           }
         } catch (e) {
-          // Network failure or any unexpected throw — make sure we record an
-          // error and don't leave the caller stuck on a null profile with no
-          // diagnostic info. Previously this propagated to the bootstrap and
-          // skipped setLoading(false), producing a permanent silent stuck state.
           const msg = e instanceof Error ? e.message : 'שגיאה לא צפויה בטעינת הפרופיל';
+          // Timeout-specific path: don't surface the error to the user yet,
+          // just loop the outer for and try again. The wake-up is already
+          // in flight from the failed attempt, so attempt N+1 is much more
+          // likely to land. We only give up after coldRetry exhausts.
+          if (e instanceof Error && /timeout/i.test(e.message) && coldRetry < 2) {
+            console.warn('[auth] loadProfile timeout, auto-retrying for cold-start:', msg);
+            await new Promise((r) => setTimeout(r, 1500));
+            continue;
+          }
+          // Network failure or any unexpected throw — record the error so the
+          // UI can surface it. Previously this skipped setLoading(false) in
+          // the bootstrap path and left a permanent silent stuck state.
           console.error('[auth] loadProfile threw:', e);
           setProfileError(msg);
           if (clearOnFail) setProfile(null);
+          return;
+        }
+        // Inner loop completed without success or throw — exit the outer
+        // retry chain too (we've already called setProfileError inside).
+        return;
         }
       })();
       inFlight.current = run;
