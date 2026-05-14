@@ -232,8 +232,10 @@ function makeTools(sb: ReturnType<typeof createClient>, userId: string) {
       if (!svc) return { error: 'שירות לא נמצא' };
 
       const duration = svc.duration_minutes as number;
-      const dayDate = new Date(`${date}T00:00:00`);
-      const weekday = dayDate.getDay();
+      // Parse as UTC and read getUTCDay() so the weekday doesn't shift by ±1
+      // when Deno's runtime TZ (UTC) and the user's intended date interact at
+      // the day boundary. The date string already carries no TZ ambiguity.
+      const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
 
       // Fallback to default hours if the clinic hasn't configured any:
       // Sun-Thu 9-17, Fri 9-13, Sat closed.
